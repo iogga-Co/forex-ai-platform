@@ -1,0 +1,3 @@
+setup:
+  project: forex-ai-platform
+  config: development

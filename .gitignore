@@ -8,7 +8,8 @@
 *.key
 *.p12
 *.pfx
-doppler.yaml
+# doppler.yaml is a project config (no secrets) — committed intentionally
+# doppler-secrets.yaml would contain secrets — never commit that
 
 # =============================================================================
 # Python
