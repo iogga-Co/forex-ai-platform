@@ -1,0 +1,26 @@
+# API Framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# Settings & Validation
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.12
+
+# Database
+asyncpg==0.30.0
+sqlalchemy[asyncio]==2.0.36
+
+# Task Queue
+celery==5.4.0
+redis==5.2.1
+
+# Observability — exposes /metrics for Prometheus scraping
+prometheus-fastapi-instrumentator==7.0.0
+
+# HTTP client (for OANDA, Voyage AI calls in later phases)
+httpx==0.28.1
