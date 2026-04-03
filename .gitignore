@@ -1,0 +1,94 @@
+# =============================================================================
+# Secrets & Environment — NEVER commit these
+# =============================================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+doppler.yaml
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+
+# Ruff cache
+.ruff_cache/
+
+# =============================================================================
+# Node.js / Next.js
+# =============================================================================
+node_modules/
+.next/
+out/
+.cache/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# =============================================================================
+# Docker
+# =============================================================================
+# Ignore local override files (use docker-compose.override.yml for local tweaks)
+docker-compose.override.yml
+
+# =============================================================================
+# Databases & Data
+# =============================================================================
+# Never commit raw price data or database dumps to git
+data/
+*.sql.gz
+*.dump
+*.csv
+*.parquet
+
+# TimescaleDB / Postgres local volumes (if not using named volumes)
+pgdata/
+clickhouse-data/
+
+# =============================================================================
+# Logs
+# =============================================================================
+*.log
+logs/
+
+# =============================================================================
+# IDE & OS
+# =============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini

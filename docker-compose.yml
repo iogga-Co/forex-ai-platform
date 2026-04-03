@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # The Brain (Python API)
+  fastapi:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgres://user:pass@timescaledb:5432/forex_db
+
+  # The Face (User Interface)
+  nextjs:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+
+  # The Memory (Database)
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=forex_db
+      - POSTGRES_PASSWORD=pass # We will move this to Doppler later!
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+
+  # The Postman (Messaging)
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  timescaledb_data:
