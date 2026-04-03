@@ -24,3 +24,7 @@ prometheus-fastapi-instrumentator==7.0.0
 
 # HTTP client (for OANDA, Voyage AI calls in later phases)
 httpx==0.28.1
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0

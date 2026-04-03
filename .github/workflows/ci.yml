@@ -1,0 +1,353 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: "Deploy target"
+        required: true
+        default: "production"
+        type: choice
+        options: ["production"]
+
+# Cancel in-progress runs on the same branch when a new push arrives.
+# Prevents stale builds queuing up during rapid development.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/forex-ai
+
+jobs:
+  # ===========================================================================
+  # JOB 1 — Backend: lint, type check, unit tests
+  # Runs on every push to every branch.
+  # ===========================================================================
+  backend:
+    name: Backend — Lint, Types, Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+        working-directory: backend
+
+      - name: Ruff — lint
+        run: pip install ruff && ruff check backend/
+
+      - name: Mypy — type check
+        run: pip install mypy && mypy backend/ --ignore-missing-imports
+
+      - name: Pytest — unit tests
+        run: pytest backend/tests/ -v --tb=short
+        env:
+          # Minimal env so Settings() can be instantiated in tests.
+          # Real secrets never appear here — tests mock external calls.
+          DATABASE_URL: "postgresql://test:test@localhost:5432/test"
+          REDIS_URL: "redis://localhost:6379/0"
+          CLICKHOUSE_URL: "http://test:test@localhost:8123/test"
+          JWT_SECRET: "test-secret-that-is-long-enough-for-hs256-algorithm"
+          CLAUDE_API_KEY: "test"
+          VOYAGE_API_KEY: "test"
+          OANDA_API_KEY: "test"
+          OANDA_ACCOUNT_ID: "test"
+          OANDA_ENVIRONMENT: "practice"
+          GRAFANA_ADMIN_PASSWORD: "test"
+          NEXT_PUBLIC_API_URL: "http://localhost:3000"
+          OPERATOR_PASSWORD: "test"
+
+  # ===========================================================================
+  # JOB 2 — Frontend: lint, type check
+  # Runs on every push to every branch.
+  # ===========================================================================
+  frontend:
+    name: Frontend — Lint, Types
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: ESLint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: TypeScript — type check
+        run: npx tsc --noEmit
+        working-directory: frontend
+
+  # ===========================================================================
+  # JOB 3 — Docker build
+  # Confirms both images build cleanly. Runs on every push.
+  # Images are only pushed to the registry on merge to main.
+  # ===========================================================================
+  docker-build:
+    name: Docker — Build Images
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ env.IMAGE_PREFIX }}-backend:${{ github.sha }}
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }}
+
+  # ===========================================================================
+  # JOB 4 — Integration tests
+  # Runs only on merge to main. Uses a real Postgres service container.
+  # ===========================================================================
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg15
+        env:
+          POSTGRES_DB: forex_test
+          POSTGRES_USER: forex_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+        working-directory: backend
+
+      - name: Apply database migrations
+        run: |
+          pip install psycopg2-binary
+          for f in db/migrations/*.sql; do
+            echo "Running $f"
+            PGPASSWORD=test_password psql -h localhost -U forex_user -d forex_test -f "$f"
+          done
+
+      - name: Pytest — integration tests
+        run: pytest backend/tests/ -v --tb=short -m integration
+        env:
+          DATABASE_URL: "postgresql://forex_user:test_password@localhost:5432/forex_test"
+          REDIS_URL: "redis://localhost:6379/0"
+          CLICKHOUSE_URL: "http://test:test@localhost:8123/test"
+          JWT_SECRET: "test-secret-that-is-long-enough-for-hs256-algorithm"
+          CLAUDE_API_KEY: "test"
+          VOYAGE_API_KEY: "test"
+          OANDA_API_KEY: "test"
+          OANDA_ACCOUNT_ID: "test"
+          OANDA_ENVIRONMENT: "practice"
+          GRAFANA_ADMIN_PASSWORD: "test"
+          NEXT_PUBLIC_API_URL: "http://localhost:3000"
+          OPERATOR_PASSWORD: "test"
+
+  # ===========================================================================
+  # JOB 5 — Push images + deploy to staging
+  # Runs only on merge to main.
+  # Skips gracefully if staging secrets are not yet configured.
+  # ===========================================================================
+  deploy-staging:
+    name: Deploy — Staging
+    runs-on: ubuntu-latest
+    needs: [docker-build, integration]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check staging secrets are available
+        id: secrets-check
+        run: |
+          if [ -z "${{ secrets.STAGING_HOST }}" ] || [ -z "${{ secrets.STAGING_SSH_KEY }}" ]; then
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "Staging secrets not configured — skipping deploy."
+          else
+            echo "available=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.secrets-check.outputs.available == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: steps.secrets-check.outputs.available == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Push backend image
+        if: steps.secrets-check.outputs.available == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          cache-from: type=gha
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-backend:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}-backend:latest
+
+      - name: Push frontend image
+        if: steps.secrets-check.outputs.available == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          cache-from: type=gha
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}-frontend:latest
+
+      - name: Deploy to staging VPS
+        if: steps.secrets-check.outputs.available == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: deploy
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            cd /opt/forex-ai-platform
+            git pull origin main
+            doppler run -- docker compose pull
+            doppler run -- docker compose up -d --remove-orphans
+
+      - name: Smoke test — health endpoint
+        if: steps.secrets-check.outputs.available == 'true'
+        run: |
+          echo "Waiting for services to start..."
+          sleep 15
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.STAGING_HOST }}/api/health)
+          if [ "$STATUS" != "200" ]; then
+            echo "Health check failed — got HTTP $STATUS"
+            exit 1
+          fi
+          echo "Health check passed — HTTP $STATUS"
+
+  # ===========================================================================
+  # JOB 6 — Production deploy
+  # Manual trigger only (workflow_dispatch). Never runs automatically.
+  # The live trading feature flag state is never touched by this workflow.
+  # ===========================================================================
+  deploy-production:
+    name: Deploy — Production
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check production secrets are available
+        id: secrets-check
+        run: |
+          if [ -z "${{ secrets.PRODUCTION_HOST }}" ] || [ -z "${{ secrets.PRODUCTION_SSH_KEY }}" ]; then
+            echo "Production secrets not configured."
+            exit 1
+          fi
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Deploy to production VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: deploy
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd /opt/forex-ai-platform
+            git pull origin main
+            doppler run -- docker compose pull
+            doppler run -- docker compose up -d --remove-orphans
+            # NOTE: LIVE_TRADING_ENABLED flag state in Doppler is never
+            # modified here. Enabling live trading is always a separate,
+            # explicit operator action.
+
+      - name: Smoke test — health endpoint
+        run: |
+          echo "Waiting for services to start..."
+          sleep 15
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.PRODUCTION_HOST }}/api/health)
+          if [ "$STATUS" != "200" ]; then
+            echo "Health check failed — got HTTP $STATUS"
+            exit 1
+          fi
+          echo "Health check passed — HTTP $STATUS"
