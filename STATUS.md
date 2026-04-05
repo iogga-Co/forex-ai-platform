@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-05
+**Last updated:** 2026-04-05 (CI secrets corrected — STAGING_SSH_KEY and STAGING_HOST verified)
 
 ---
 
