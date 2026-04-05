@@ -198,7 +198,9 @@ jobs:
           done
 
       - name: Pytest — integration tests
-        run: pytest backend/tests/ -v --tb=short -m integration
+        # Exit code 5 = no tests collected (none marked @pytest.mark.integration yet).
+        # That is expected until Phase 1. Any other non-zero exit code is a real failure.
+        run: pytest backend/tests/ -v --tb=short -m integration || [ $? -eq 5 ]
         env:
           DATABASE_URL: "postgresql://forex_user:test_password@localhost:5432/forex_test"
           REDIS_URL: "redis://localhost:6379/0"
