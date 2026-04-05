@@ -68,8 +68,6 @@ services:
       - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
       - OANDA_ENVIRONMENT=${OANDA_ENVIRONMENT}
       - LIVE_TRADING_ENABLED=false
-    volumes:
-      - ./backend:/app
     depends_on:
       - timescaledb
       - redis
@@ -92,8 +90,10 @@ services:
       - CLICKHOUSE_URL=http://${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}@clickhouse:8123/${CLICKHOUSE_DB}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - VOYAGE_API_KEY=${VOYAGE_API_KEY}
-    volumes:
-      - ./backend:/app
+      - JWT_SECRET=${JWT_SECRET}
+      - OANDA_API_KEY=${OANDA_API_KEY}
+      - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
+      - OANDA_ENVIRONMENT=${OANDA_ENVIRONMENT}
     depends_on:
       - timescaledb
       - redis
@@ -112,10 +112,6 @@ services:
       - "3000"
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
     depends_on:
       - fastapi
     networks:

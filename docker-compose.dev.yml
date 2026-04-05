@@ -1,0 +1,29 @@
+# =============================================================================
+# Development override — adds source bind mounts for hot reload.
+# Use this locally: doppler run -- docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Never used on staging or production — those environments bake code into images.
+# =============================================================================
+
+services:
+  nginx:
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+
+  fastapi:
+    volumes:
+      - ./backend:/app
+
+  celery:
+    volumes:
+      - ./backend:/app
+
+  nextjs:
+    volumes:
+      - ./frontend:/app
+      - nextjs_node_modules:/app/node_modules
+      - nextjs_next:/app/.next
+
+volumes:
+  nextjs_node_modules:
+  nextjs_next:
