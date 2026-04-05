@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-05 (CI secrets corrected — STAGING_SSH_KEY and STAGING_HOST verified)
+**Last updated:** 2026-04-05 (Phase 0 fully complete — all 6 CI jobs green, staging deploy verified end-to-end)
 
 ---
 
@@ -86,8 +86,8 @@ doppler run -- docker compose up
 | `GHCR_TOKEN` | ✅ Set |
 | `STAGING_HOST` | ✅ Set |
 | `STAGING_SSH_KEY` | ✅ Set |
-| `PRODUCTION_HOST` | Not set — needed for Phase 5 |
-| `PRODUCTION_SSH_KEY` | Not set — needed for Phase 5 |
+| `PRODUCTION_HOST` | ⚠️ Set but points to non-existent server — needed for Phase 5 only |
+| `PRODUCTION_SSH_KEY` | ⚠️ Set but points to non-existent server — needed for Phase 5 only |
 
 ---
 
