@@ -21,8 +21,6 @@ volumes:
   redis_data:
   prometheus_data:
   grafana_data:
-  nextjs_node_modules:
-  nextjs_next:
 
 # =============================================================================
 # Services
@@ -70,8 +68,6 @@ services:
       - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
       - OANDA_ENVIRONMENT=${OANDA_ENVIRONMENT}
       - LIVE_TRADING_ENABLED=false
-    volumes:
-      - ./backend:/app
     depends_on:
       - timescaledb
       - redis
@@ -98,8 +94,6 @@ services:
       - OANDA_API_KEY=${OANDA_API_KEY}
       - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
       - OANDA_ENVIRONMENT=${OANDA_ENVIRONMENT}
-    volumes:
-      - ./backend:/app
     depends_on:
       - timescaledb
       - redis
@@ -118,10 +112,6 @@ services:
       - "3000"
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-    volumes:
-      - ./frontend:/app
-      - nextjs_node_modules:/app/node_modules
-      - nextjs_next:/app/.next
     depends_on:
       - fastapi
     networks:
