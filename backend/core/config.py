@@ -34,6 +34,5 @@ class Settings(BaseSettings):
 
 
 # Single instance imported everywhere.
-# type: ignore[call-arg] — pydantic-settings populates fields from env vars,
-# not constructor arguments. Mypy cannot see this at static analysis time.
+# pydantic-settings populates fields from env vars, not constructor arguments.
 settings = Settings()  # type: ignore[call-arg]

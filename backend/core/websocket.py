@@ -43,7 +43,7 @@ class ConnectionManager:
 
     async def broadcast_to_session(self, session_id: str, message: Any) -> None:
         """Send a JSON message to all connections in a session."""
-        connections = self._connections.get(session_id, [])
+        connections = self._connections.get(session_id, set())
         dead = []
         for ws in connections:
             try:
