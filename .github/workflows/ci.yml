@@ -46,7 +46,6 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
-        working-directory: backend
 
       - name: Ruff — lint
         run: pip install ruff && ruff check backend/
@@ -186,7 +185,6 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
-        working-directory: backend
 
       - name: Apply database migrations
         run: |
