@@ -33,5 +33,6 @@ class Settings(BaseSettings):
     )
 
 
-# Single instance imported everywhere
-settings = Settings()
+# Single instance imported everywhere.
+# pydantic-settings populates fields from env vars, not constructor arguments.
+settings = Settings()  # type: ignore[call-arg]

@@ -5,7 +5,6 @@ no Redis, and no external services. All other tests are added in later phases
 alongside the domain logic they test.
 """
 
-import pytest
 from fastapi.testclient import TestClient
 
 from main import app

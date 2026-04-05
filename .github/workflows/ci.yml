@@ -46,7 +46,6 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
-        working-directory: backend
 
       - name: Ruff — lint
         run: pip install ruff && ruff check backend/
@@ -117,6 +116,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set lowercase image prefix
+        run: echo "IMAGE_PREFIX=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/forex-ai" >> $GITHUB_ENV
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -186,7 +188,6 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
-        working-directory: backend
 
       - name: Apply database migrations
         run: |
@@ -226,6 +227,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set lowercase image prefix
+        run: echo "IMAGE_PREFIX=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/forex-ai" >> $GITHUB_ENV
 
       - name: Check staging secrets are available
         id: secrets-check
@@ -310,6 +314,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set lowercase image prefix
+        run: echo "IMAGE_PREFIX=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/forex-ai" >> $GITHUB_ENV
 
       - name: Check production secrets are available
         id: secrets-check

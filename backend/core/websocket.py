@@ -25,26 +25,25 @@ class ConnectionManager:
     """
 
     def __init__(self) -> None:
-        # session_id → list of active WebSocket connections for that session
-        self._connections: dict[str, list[WebSocket]] = {}
+        # session_id → set of active WebSocket connections for that session
+        # set gives O(1) lookup and discard without raising on missing elements
+        self._connections: dict[str, set[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, session_id: str) -> None:
         await websocket.accept()
         if session_id not in self._connections:
-            self._connections[session_id] = []
-        self._connections[session_id].append(websocket)
+            self._connections[session_id] = set()
+        self._connections[session_id].add(websocket)
 
     def disconnect(self, websocket: WebSocket, session_id: str) -> None:
         if session_id in self._connections:
-            self._connections[session_id].discard(websocket) if hasattr(
-                self._connections[session_id], "discard"
-            ) else self._connections[session_id].remove(websocket)
+            self._connections[session_id].discard(websocket)
             if not self._connections[session_id]:
                 del self._connections[session_id]
 
     async def broadcast_to_session(self, session_id: str, message: Any) -> None:
         """Send a JSON message to all connections in a session."""
-        connections = self._connections.get(session_id, [])
+        connections = self._connections.get(session_id, set())
         dead = []
         for ws in connections:
             try:
