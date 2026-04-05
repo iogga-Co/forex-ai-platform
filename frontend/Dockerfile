@@ -12,6 +12,10 @@ RUN npm ci
 # Copy application code
 COPY . .
 
+# Ensure .next is writable by appuser — the Docker anonymous volume for /app/.next
+# inherits ownership from the image, so this must be set before USER switches.
+RUN mkdir -p .next && chown -R appuser:appgroup .next
+
 # Switch to non-root user
 USER appuser
 
