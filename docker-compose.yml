@@ -92,6 +92,10 @@ services:
       - CLICKHOUSE_URL=http://${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}@clickhouse:8123/${CLICKHOUSE_DB}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - VOYAGE_API_KEY=${VOYAGE_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - OANDA_API_KEY=${OANDA_API_KEY}
+      - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
+      - OANDA_ENVIRONMENT=${OANDA_ENVIRONMENT}
     volumes:
       - ./backend:/app
     depends_on:
