@@ -5,6 +5,11 @@
 # =============================================================================
 
 services:
+  nginx:
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+
   fastapi:
     volumes:
       - ./backend:/app
