@@ -22,8 +22,6 @@ Tests skip gracefully if the fixture file doesn't exist yet (first-time setup).
 Run the generate script to create it.
 """
 
-import json
-from datetime import datetime
 from pathlib import Path
 
 import pytest

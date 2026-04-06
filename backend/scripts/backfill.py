@@ -36,10 +36,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("backfill")
 
-from core.config import settings
-from data import db as data_db
-from data import dukascopy
-from data.quality import detect_gaps, filter_outliers
+from core.config import settings  # noqa: E402
+from data import db as data_db  # noqa: E402
+from data import dukascopy  # noqa: E402
+from data.quality import detect_gaps, filter_outliers  # noqa: E402
 
 _DEFAULT_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY"]
 _DEFAULT_TIMEFRAMES = ["1m", "1H"]
@@ -118,12 +118,8 @@ def _backfill_one(
     logger.info("  Downloaded %d bars from Dukascopy", len(bars))
 
     # Apply quality checks using a temporary DataFrame
-    import pandas as pd
-    from data.quality import normalize_to_utc
-
     if bars:
         import pandas as pd
-        from datetime import timezone
 
         df = pd.DataFrame(
             [{"timestamp": b.timestamp, "open": b.open, "high": b.high,

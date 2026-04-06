@@ -18,7 +18,6 @@ The ONE-BAR SHIFT that prevents look-ahead bias is applied in runner.py,
 not here.  Do NOT shift signals inside this module.
 """
 
-import functools
 import logging
 from functools import reduce
 from typing import Any

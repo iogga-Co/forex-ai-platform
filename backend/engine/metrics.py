@@ -5,11 +5,9 @@ All metric functions return floats (not numpy scalars) for JSON serialisation.
 NaN/infinite values are replaced with None to represent "not calculable".
 """
 
-import math
 import logging
-from datetime import datetime, timezone
+import math
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -109,7 +107,6 @@ def extract_trades(
         return []
 
     trade_list: list[dict] = []
-    close = df["close"]
     high = df["high"]
     low = df["low"]
 

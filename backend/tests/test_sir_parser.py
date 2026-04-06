@@ -5,12 +5,10 @@ Tests do NOT require a running database or Redis.
 """
 
 import pytest
-import pandas as pd
-import numpy as np
 
 from pydantic import ValidationError
 
-from engine.sir import StrategyIR, IndicatorCondition
+from engine.sir import StrategyIR
 from engine.parser import SIRParser
 
 

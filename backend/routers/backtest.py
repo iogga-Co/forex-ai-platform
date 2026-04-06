@@ -6,7 +6,6 @@ GET  /api/backtest/jobs/{job_id}/status  — poll job status
 GET  /api/backtest/results/{result_id}   — fetch completed result
 """
 
-import json
 import logging
 from typing import Annotated
 from uuid import UUID

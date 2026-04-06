@@ -22,9 +22,9 @@ from pathlib import Path
 backend_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(backend_root))
 
-from tests.conftest import make_ohlcv
-from engine.sir import StrategyIR
-from engine.runner import run_backtest
+from tests.conftest import make_ohlcv  # noqa: E402
+from engine.sir import StrategyIR  # noqa: E402
+from engine.runner import run_backtest  # noqa: E402
 
 FIXTURES_DIR = Path(__file__).parent
 GOLDEN_EXPECTED_PATH = FIXTURES_DIR / "golden_expected.json"

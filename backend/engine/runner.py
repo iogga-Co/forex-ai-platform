@@ -25,10 +25,9 @@ are deterministic once compiled.  The first run may be slower (compilation).
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
-import numpy as np
 import pandas as pd
 import vectorbt as vbt
 
