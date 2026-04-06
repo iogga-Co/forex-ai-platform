@@ -53,6 +53,9 @@ jobs:
       - name: Mypy — type check
         run: pip install mypy && mypy backend/ --ignore-missing-imports
 
+      - name: Debug — verify data package importable
+        run: python -c "import sys; sys.path.insert(0,'${{ github.workspace }}/backend'); import data; print('data OK:', data.__file__)"
+
       - name: Pytest — unit tests
         run: pytest tests/ -v --tb=short
         working-directory: backend
