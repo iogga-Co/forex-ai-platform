@@ -10,16 +10,18 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# Ensure backend/ is in sys.path regardless of where pytest is invoked from.
-# Required so that `from data import ...`, `from engine import ...`, etc. all
-# resolve correctly when pytest is run from the repo root OR from backend/.
-_backend_dir = str(Path(__file__).parent.parent)
-if _backend_dir not in sys.path:
-    sys.path.insert(0, _backend_dir)
-
 import numpy as np
 import pandas as pd
 import pytest
+
+# Ensure backend/ is in sys.path regardless of where pytest is invoked from.
+# Required so that `from data import ...`, `from engine import ...`, etc. all
+# resolve correctly when pytest is run from the repo root OR from backend/.
+# conftest.py is fully executed before any test module is collected, so this
+# runs before test_health.py's transitive `from data import db` is attempted.
+_backend_dir = str(Path(__file__).parent.parent)
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
