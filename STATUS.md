@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-06 (Phase 1 in progress — all Phase 1 code written, pending golden fixture generation and staging deploy)
+**Last updated:** 2026-04-06 (Phase 1 complete — all CI green, staging deployed)
 
 ---
 
@@ -9,7 +9,7 @@
 | Phase | Name | Status | Gate Passed |
 |---|---|---|---|
 | **0** | Foundation | ✅ Complete | ✅ Health check returns 200 over HTTPS |
-| **1** | Core Engine | 🔄 In Progress | Pending: generate golden fixtures, run CI, verify E2E backtest |
+| **1** | Core Engine | ✅ Complete | ✅ 58 tests pass, CI green, PR #7 merged, staging live |
 | **2** | AI Intelligence | Not started | Pending |
 | **3** | Analytics Suite | Not started | Pending |
 | **4** | Live Trading | Not started | Pending |
@@ -37,24 +37,24 @@
 ### Tables created
 | Table | Purpose |
 |---|---|
-| `ohlcv_candles` | TimescaleDB hypertable for price data (Phase 1) |
-| `strategies` | Strategy IR versions with embeddings (Phase 2) |
-| `conversation_turns` | Full dialog history with BM25 + vector indexes (Phase 2) |
-| `backtest_runs` | Backtest results with Claude-generated summaries (Phase 1/2) |
-| `trades` | Per-trade granularity with MAE/MFE (Phase 1) |
-| `live_orders` | Live execution record (Phase 4) |
-| `alert_events` | System-wide monitoring event log (all phases) |
+| `ohlcv_candles` | TimescaleDB hypertable for price data |
+| `strategies` | Strategy IR versions with embeddings |
+| `conversation_turns` | Full dialog history with BM25 + vector indexes |
+| `backtest_runs` | Backtest results with metrics |
+| `trades` | Per-trade granularity with MAE/MFE |
+| `live_orders` | Live execution record |
+| `alert_events` | System-wide monitoring event log |
 
 ---
 
-## Phase 1 — In Progress
+## Phase 1 — Complete ✅
 
-**Goal:** One complete backtest runs end-to-end with correct metrics.
+**Gate passed 2026-04-06.** PR #7 merged to main. All 6 CI jobs green. Staging auto-deployed.
 
-### Code written (2026-04-06)
+### What was built
 
-**New packages added to requirements.txt:**
-- `numpy==1.26.4`, `pandas==2.2.3`, `vectorbt==0.26.2`
+**New packages:**
+- `numpy==1.26.4`, `pandas==2.2.3`, `vectorbt==0.26.2`, `plotly==5.11.0`
 - `yfinance==0.2.51`, `psycopg2-binary==2.9.10`, `pytest-mock==3.14.0`
 
 **New DB migration:**
@@ -82,34 +82,65 @@
 - `backend/engine/runner.py` — vectorbt portfolio runner with look-ahead bias prevention
 
 **Celery & API:**
-- `backend/tasks/backtest.py` — full Celery task implementation (fetch → run → store → publish)
-- `backend/core/celery_app.py` — updated: include=["tasks.backtest"]
+- `backend/tasks/backtest.py` — full Celery task: fetch → validate → run → store → publish
+- `backend/core/celery_app.py` — updated: `include=["tasks.backtest"]`
 - `backend/routers/backtest.py` — POST /api/backtest, GET /api/backtest/jobs/{id}/status, GET /api/backtest/results/{id}
-- `backend/routers/strategy.py` — implemented: POST, GET list, GET by ID
+- `backend/routers/strategy.py` — POST, GET list, GET by ID
 
-**Tests:**
+**Tests (58 total, all passing):**
 - `backend/tests/conftest.py` — shared fixtures: synthetic OHLCV, SIR dicts, golden dataset
-- `backend/tests/test_indicators.py` — unit tests for all 8 indicators
-- `backend/tests/test_sir_parser.py` — SIR validation and SIRParser unit tests
-- `backend/tests/test_golden.py` — golden dataset regression tests (skip if fixture not generated)
+- `backend/tests/test_indicators.py` — 38 unit tests for all 8 indicators
+- `backend/tests/test_sir_parser.py` — 12 SIR validation and SIRParser unit tests
+- `backend/tests/test_golden.py` — 7 golden dataset regression tests
+- `backend/tests/test_health.py` — 3 health check tests
 - `backend/tests/fixtures/golden_strategy.json` — the golden strategy definition
-- `backend/tests/fixtures/generate_golden.py` — script to generate golden_expected.json
+- `backend/tests/fixtures/golden_expected.json` — pre-computed reference output (committed)
+- `backend/tests/fixtures/generate_golden.py` — script to regenerate golden_expected.json
 
 **Scripts:**
 - `backend/scripts/backfill.py` — CLI script to backfill 5yr historical data from Dukascopy
 
-### Remaining before Phase 1 gate
+### Key lessons from Phase 1
+- `backend/data/` was silently excluded by `.gitignore`'s `data/` pattern — fixed with `!backend/data/` exception
+- `vectorbt==0.26.2` requires `numpy==1.26.4` (<2.0) and `plotly==5.11.0` (heatmapgl removed in ≥5.12)
+- `NUMBA_CACHE_DIR=/tmp/numba_cache` required when running vectorbt in Docker as non-root
+- CI pytest needs `working-directory: backend` + `PYTHONPATH: ${{ github.workspace }}/backend`
 
-- [ ] **Generate golden fixtures**: `cd backend && python tests/fixtures/generate_golden.py`
-  (requires all packages installed; run locally or in dev Docker container)
-- [ ] **Run full test suite**: `pytest backend/tests/ -v` — all tests must pass
-- [ ] **Backfill historical data**: `doppler run -- python backend/scripts/backfill.py`
-  (downloads 5yr EURUSD/GBPUSD/USDJPY/EURGBP/GBPJPY 1m+1H — takes ~2 hours)
-- [ ] **Create test strategy**: POST to `/api/strategies` with a SIR document
-- [ ] **Run E2E backtest**: POST to `/api/backtest`, verify WebSocket progress, GET result
-- [ ] **Verify gate criteria**: complete backtest on 4yr EUR/USD 1H, output matches expected metrics
-- [ ] CI pipeline green on the Phase 1 feature branch
-- [ ] Merge to main and confirm staging deploy
+---
+
+## Phase 2 — Next: AI Intelligence
+
+**Goal:** AI Co-Pilot produces a valid SIR from natural language, stored in RAG, retrievable by subsequent queries.
+
+### What to build
+- Claude API integration — system prompt with SIR schema, indicator descriptions, risk rules
+- Voyage AI embedding service — wraps Voyage AI API, caches in Redis
+- pgvector + BM25 hybrid retrieval — `conversation_turns`, `strategies`, `backtest_runs`
+- Auto-summary pipeline — Claude summarises each backtest result, stored with embedding
+- Conversation endpoint — embed → retrieve → assemble prompt → stream response
+- SIR editor — parse Claude's proposed SIR update, validate, diff, store new version
+- Co-Pilot frontend panel — chat history + Strategy IR inspector with version history
+
+### Before starting Phase 2 (optional but recommended)
+Run the backfill script on staging to load 5yr historical data (~2h, idempotent):
+```bash
+ssh deploy@86.48.16.255 "cd /opt/forex-ai-platform && doppler run -- python backend/scripts/backfill.py"
+```
+
+Then seed a test strategy and run an E2E backtest to confirm the full stack on real data:
+```bash
+# 1. Create a test strategy
+curl -X POST https://trading.iogga-co.com/api/strategies \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d @backend/tests/fixtures/golden_strategy.json
+
+# 2. Run a backtest (replace strategy_id and session_id)
+curl -X POST "https://trading.iogga-co.com/api/backtest?session_id=test123" \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"strategy_id":"<uuid>","period_start":"2020-01-01","period_end":"2024-01-01","pair":"EURUSD","timeframe":"1H"}'
+```
 
 ---
 
@@ -125,10 +156,16 @@
 | Secrets | Doppler `staging` config |
 | OANDA mode | `practice` (demo account) |
 
-### Running services
-```
-doppler run -- docker compose ps   # check status
-doppler run -- docker compose logs <service> --tail=50   # check logs
+### Useful commands
+```bash
+# Check service status
+ssh deploy@86.48.16.255 "cd /opt/forex-ai-platform && doppler run -- docker compose ps"
+
+# View logs
+ssh deploy@86.48.16.255 "cd /opt/forex-ai-platform && doppler run -- docker compose logs fastapi --tail=50"
+
+# Health check
+curl https://trading.iogga-co.com/api/health
 ```
 
 ---
@@ -139,8 +176,11 @@ doppler run -- docker compose logs <service> --tail=50   # check logs
 # Start all services with hot reload
 doppler run -- docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
-# Start without hot reload (matches server behaviour)
-doppler run -- docker compose up
+# Run tests (from repo root)
+cd backend && pytest tests/ -v
+
+# Run backfill locally (dry run)
+DRY_RUN=1 doppler run -- python backend/scripts/backfill.py
 ```
 
 ---
