@@ -44,8 +44,8 @@ Four rules govern development throughout all phases:
 
 | Phase | Name | Est. Duration | Key Deliverables | Gate Criteria |
 |---|---|---|---|---|
-| **0** | Foundation | Week 1–2 | Repo, CI/CD, Docker Compose, DB schemas, FastAPI skeleton, Nginx on VPS | All services start cleanly in dev and staging |
-| **1** | Core Engine | Week 2–4 | Data pipeline, TimescaleDB ingestion, vectorbt backtesting, Strategy IR | One complete backtest runs end-to-end with correct metrics |
+| **0** | Foundation | Week 1–2 | Repo, CI/CD, Docker Compose, DB schemas, FastAPI skeleton, Nginx on VPS | ✅ All services start cleanly in dev and staging |
+| **1** | Core Engine | Week 2–4 | Data pipeline, TimescaleDB ingestion, vectorbt backtesting, Strategy IR | ✅ Complete backtest runs end-to-end with correct metrics (2026-04-06) |
 | **2** | AI Intelligence | Week 4–6 | Claude API integration, RAG pipeline, pgvector, Co-Pilot interface | AI produces valid SIR from natural language, stored in RAG |
 | **3** | Analytics Suite | Week 6–8 | Full chart library, AG Grid trade table, MAE/MFE, Monte Carlo, compare | All analytics match hand-calculated values on known test data |
 | **4** | Live Trading | Week 8–10 | OANDA paper trading, order manager, risk manager, kill switch, alerting | 30-day paper trading gate: zero uncaught errors |
