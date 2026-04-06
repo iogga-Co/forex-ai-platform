@@ -14,6 +14,7 @@ python-multipart==0.0.12
 # Database
 asyncpg==0.30.0
 sqlalchemy[asyncio]==2.0.36
+psycopg2-binary==2.9.10      # sync DB for Celery workers and data pipeline scripts
 
 # Task Queue
 celery==5.4.0
@@ -22,9 +23,18 @@ redis==5.2.1
 # Observability — exposes /metrics for Prometheus scraping
 prometheus-fastapi-instrumentator==7.0.0
 
-# HTTP client (for OANDA, Voyage AI calls in later phases)
+# HTTP client (for OANDA, Voyage AI calls, Dukascopy download)
 httpx==0.28.1
+
+# Phase 1 — Data pipeline & backtesting engine
+# numpy must be <2.0 — vectorbt 0.26.x uses deprecated numpy APIs
+numpy==1.26.4
+pandas==2.2.3
+vectorbt==0.26.2
+plotly==5.11.0              # vectorbt 0.26.x is incompatible with plotly >=5.12 (heatmapgl removed)
+yfinance==0.2.51
 
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0
+pytest-mock==3.14.0

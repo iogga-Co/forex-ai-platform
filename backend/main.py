@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -5,16 +7,47 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from core import db as core_db
+from core.config import settings
+from core.redis_bridge import subscribe_and_forward
+from core.websocket import manager
 from routers import auth, backtest, health, strategy, trading, ws
+
+logger = logging.getLogger(__name__)
+
+_redis_bridge_task: asyncio.Task | None = None
+_redis_bridge_stop = asyncio.Event()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    global _redis_bridge_task, _redis_bridge_stop
+
     # --- Startup ---
-    # Database connection pool, Redis connection, etc. initialized here in later phases
+    logger.info("Initialising database connection pool")
+    await core_db.init_pool(settings.database_url)
+
+    logger.info("Starting Redis pub/sub bridge for WebSocket progress streaming")
+    _redis_bridge_stop = asyncio.Event()
+    _redis_bridge_task = asyncio.create_task(
+        subscribe_and_forward(settings.redis_url, manager, _redis_bridge_stop),
+        name="redis-bridge",
+    )
+
     yield
+
     # --- Shutdown ---
-    # Graceful cleanup of connections goes here
+    logger.info("Shutting down Redis bridge")
+    _redis_bridge_stop.set()
+    if _redis_bridge_task and not _redis_bridge_task.done():
+        _redis_bridge_task.cancel()
+        try:
+            await _redis_bridge_task
+        except asyncio.CancelledError:
+            pass
+
+    logger.info("Closing database connection pool")
+    await core_db.close_pool()
 
 
 app = FastAPI(
@@ -40,7 +73,6 @@ app.add_middleware(
 
 # ---------------------------------------------------------------------------
 # Prometheus metrics — exposes /metrics for Prometheus scraping.
-# Automatically instruments all routes with request count and latency.
 # ---------------------------------------------------------------------------
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
