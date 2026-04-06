@@ -5,9 +5,17 @@ All fixtures that produce DataFrames use a fixed numpy random seed (42) so
 that test results are fully reproducible across machines and Python versions.
 """
 
+import sys
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# Ensure backend/ is in sys.path regardless of where pytest is invoked from.
+# Required so that `from data import ...`, `from engine import ...`, etc. all
+# resolve correctly when pytest is run from the repo root OR from backend/.
+_backend_dir = str(Path(__file__).parent.parent)
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 import numpy as np
 import pandas as pd
