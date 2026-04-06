@@ -65,7 +65,7 @@ async def run_backtest(
             "Progress events are routed to this session."
         ),
     ),
-    _: Annotated[TokenData, Depends(get_current_user)] = None,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
 ) -> BacktestJobResponse:
     """
     Dispatch a backtest job to Celery.
@@ -100,7 +100,7 @@ async def run_backtest(
 @router.get("/jobs/{job_id}/status", response_model=BacktestStatusResponse)
 async def get_backtest_status(
     job_id: str,
-    _: Annotated[TokenData, Depends(get_current_user)] = None,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
 ) -> BacktestStatusResponse:
     """Poll the status of a dispatched backtest job."""
     result = AsyncResult(job_id, app=celery_app)
@@ -139,7 +139,7 @@ async def get_backtest_status(
 @router.get("/results/{result_id}")
 async def get_backtest_result(
     result_id: UUID,
-    _: Annotated[TokenData, Depends(get_current_user)] = None,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
 ) -> dict:
     """
     Retrieve a completed backtest result including metrics and all trades.

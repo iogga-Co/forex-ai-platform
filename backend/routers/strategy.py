@@ -44,7 +44,7 @@ class StrategyResponse(BaseModel):
 @router.post("", response_model=StrategyResponse, status_code=201)
 async def create_strategy(
     payload: CreateStrategyRequest,
-    _: Annotated[TokenData, Depends(get_current_user)] = None,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
 ) -> StrategyResponse:
     """
     Save a new strategy version.
@@ -104,7 +104,7 @@ async def create_strategy(
 
 @router.get("", response_model=list[StrategyResponse])
 async def list_strategies(
-    _: Annotated[TokenData, Depends(get_current_user)] = None,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
 ) -> list[StrategyResponse]:
     """List all strategy versions, newest first."""
     pool = await get_pool()
@@ -133,7 +133,7 @@ async def list_strategies(
 @router.get("/{strategy_id}", response_model=StrategyResponse)
 async def get_strategy(
     strategy_id: UUID,
-    _: Annotated[TokenData, Depends(get_current_user)] = None,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
 ) -> StrategyResponse:
     """Retrieve a specific strategy version by ID."""
     pool = await get_pool()

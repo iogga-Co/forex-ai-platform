@@ -8,6 +8,8 @@ The filter mask is applied to the SHIFTED entry signals in runner.py, so
 it correctly filters against the EXECUTION bar (bar N+1), not the signal bar.
 """
 
+from collections.abc import Sequence
+
 import pandas as pd
 
 # London Open: 07:00–11:59 UTC
@@ -60,7 +62,7 @@ def session_mask(index: pd.DatetimeIndex, session: str) -> pd.Series:
 
 def day_of_week_mask(
     index: pd.DatetimeIndex,
-    exclude_days: list[str],
+    exclude_days: Sequence[str],
 ) -> pd.Series:
     """
     Boolean mask: True on bars whose day of week is NOT in exclude_days.
@@ -94,7 +96,7 @@ def day_of_week_mask(
 def combined_filter_mask(
     index: pd.DatetimeIndex,
     session: str = "all",
-    exclude_days: list[str] | None = None,
+    exclude_days: Sequence[str] | None = None,
 ) -> pd.Series:
     """
     AND-combination of session and day-of-week masks.
