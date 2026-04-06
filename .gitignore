@@ -67,7 +67,10 @@ docker-compose.override.yml
 # Databases & Data
 # =============================================================================
 # Never commit raw price data or database dumps to git
+# Allow backend/data/ (Python source package — not raw data)
 data/
+!backend/data/
+!backend/data/**
 *.sql.gz
 *.dump
 *.csv
