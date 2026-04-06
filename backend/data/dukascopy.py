@@ -28,7 +28,6 @@ import httpx
 import pandas as pd
 
 from data.models import OHLCVBar
-from data.quality import detect_gaps, filter_outliers, normalize_to_utc
 
 logger = logging.getLogger(__name__)
 

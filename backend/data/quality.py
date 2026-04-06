@@ -8,7 +8,7 @@ Three independent, composable functions:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pandas as pd
 

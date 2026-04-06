@@ -10,12 +10,12 @@ yfinance Forex ticker format: "{BASE}{QUOTE}=X"  (e.g. "EURUSD=X")
 
 import logging
 from collections.abc import Generator
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 import pandas as pd
 import yfinance as yf
 
-from data.models import OHLCVBar, IngestResult
+from data.models import OHLCVBar
 
 logger = logging.getLogger(__name__)
 
