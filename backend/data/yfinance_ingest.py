@@ -10,7 +10,7 @@ yfinance Forex ticker format: "{BASE}{QUOTE}=X"  (e.g. "EURUSD=X")
 
 import logging
 from collections.abc import Generator
-from datetime import date, datetime
+from datetime import date
 
 import pandas as pd
 import yfinance as yf
