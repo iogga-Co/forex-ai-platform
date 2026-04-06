@@ -57,6 +57,7 @@ jobs:
         run: pytest tests/ -v --tb=short
         working-directory: backend
         env:
+          PYTHONPATH: ${{ github.workspace }}/backend
           # Minimal env so Settings() can be instantiated in tests.
           # Real secrets never appear here — tests mock external calls.
           DATABASE_URL: "postgresql://test:test@localhost:5432/test"
