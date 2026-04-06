@@ -1,0 +1,22 @@
+{
+  "entry_conditions": [
+    { "indicator": "RSI", "period": 14, "operator": ">", "value": 50 },
+    { "indicator": "EMA", "period": 20, "operator": "price_above" }
+  ],
+  "exit_conditions": {
+    "stop_loss":   { "type": "atr", "period": 14, "multiplier": 1.5 },
+    "take_profit": { "type": "atr", "period": 14, "multiplier": 3.0 }
+  },
+  "filters": {
+    "exclude_days": [],
+    "session": "all"
+  },
+  "position_sizing": {
+    "risk_per_trade_pct": 1.0,
+    "max_size_units": 10000
+  },
+  "metadata": {
+    "description": "Golden dataset strategy — RSI momentum with EMA trend filter, ATR-based exits",
+    "version": 1
+  }
+}

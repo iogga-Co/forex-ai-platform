@@ -1,20 +1,41 @@
+"""
+Backtest API endpoints — Phase 1 implementation.
+
+POST /api/backtest          — dispatch a Celery backtest job
+GET  /api/backtest/jobs/{job_id}/status  — poll job status
+GET  /api/backtest/results/{result_id}   — fetch completed result
+"""
+
+import json
+import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from celery.result import AsyncResult
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from core.auth import TokenData, get_current_user
+from core.celery_app import celery_app
+from core.db import get_pool
+from tasks.backtest import run_backtest_task
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/backtest", tags=["Backtest"])
 
 
+# ---------------------------------------------------------------------------
+# Request / response models
+# ---------------------------------------------------------------------------
+
 class BacktestRequest(BaseModel):
     strategy_id: UUID
-    period_start: str  # ISO date string e.g. "2020-01-01"
+    period_start: str   # ISO date string e.g. "2020-01-01"
     period_end: str
     pair: str
-    timeframe: str  # e.g. "1H", "1m"
+    timeframe: str      # e.g. "1H", "1m"
+    initial_capital: float = 100_000.0
 
 
 class BacktestJobResponse(BaseModel):
@@ -24,37 +45,161 @@ class BacktestJobResponse(BaseModel):
 
 class BacktestStatusResponse(BaseModel):
     job_id: str
-    status: str          # "pending" | "running" | "complete" | "failed"
+    status: str         # "pending" | "running" | "complete" | "failed"
     progress_pct: int
     result_id: str | None = None
+    error: str | None = None
 
 
-@router.post("", response_model=BacktestJobResponse)
+# ---------------------------------------------------------------------------
+# Routes — IMPORTANT: /jobs/ and /results/ routes declared before /{id}
+# to avoid FastAPI path matching conflicts.
+# ---------------------------------------------------------------------------
+
+@router.post("", response_model=BacktestJobResponse, status_code=202)
 async def run_backtest(
     payload: BacktestRequest,
-    _: Annotated[TokenData, Depends(get_current_user)],
+    session_id: str = Query(
+        ...,
+        description=(
+            "WebSocket session ID from the client.  "
+            "Progress events are routed to this session."
+        ),
+    ),
+    _: Annotated[TokenData, Depends(get_current_user)] = None,
 ) -> BacktestJobResponse:
     """
     Dispatch a backtest job to Celery.
-    Progress streams to the frontend via WebSocket (/ws/{session_id}).
-    Implemented in Phase 1.
+
+    Returns immediately with a job_id.  Progress streams to the frontend via
+    WebSocket (/ws/{session_id}).  Poll /api/backtest/jobs/{job_id}/status
+    or listen on the WebSocket for the "complete" event.
     """
-    raise NotImplementedError("Backtest engine implemented in Phase 1")
+    task = run_backtest_task.apply_async(
+        kwargs={
+            "strategy_id": str(payload.strategy_id),
+            "pair": payload.pair.upper().replace("/", ""),
+            "timeframe": payload.timeframe,
+            "period_start": payload.period_start,
+            "period_end": payload.period_end,
+            "session_id": session_id,
+            "initial_capital": payload.initial_capital,
+        }
+    )
+    logger.info(
+        "Dispatched backtest job %s: strategy=%s %s %s %s→%s",
+        task.id,
+        payload.strategy_id,
+        payload.pair,
+        payload.timeframe,
+        payload.period_start,
+        payload.period_end,
+    )
+    return BacktestJobResponse(job_id=task.id, status="pending")
 
 
-@router.get("/{job_id}/status", response_model=BacktestStatusResponse)
+@router.get("/jobs/{job_id}/status", response_model=BacktestStatusResponse)
 async def get_backtest_status(
     job_id: str,
-    _: Annotated[TokenData, Depends(get_current_user)],
+    _: Annotated[TokenData, Depends(get_current_user)] = None,
 ) -> BacktestStatusResponse:
-    """Poll backtest job status. Implemented in Phase 1."""
-    raise NotImplementedError("Backtest engine implemented in Phase 1")
+    """Poll the status of a dispatched backtest job."""
+    result = AsyncResult(job_id, app=celery_app)
+
+    celery_to_api = {
+        "PENDING": "pending",
+        "STARTED": "running",
+        "SUCCESS": "complete",
+        "FAILURE": "failed",
+        "RETRY": "running",
+        "REVOKED": "failed",
+    }
+    status = celery_to_api.get(result.state, "pending")
+
+    result_id: str | None = None
+    error: str | None = None
+    progress_pct = 0
+
+    if result.state == "SUCCESS" and isinstance(result.result, dict):
+        result_id = result.result.get("result_id")
+        progress_pct = 100
+
+    if result.state == "FAILURE":
+        error = str(result.result) if result.result else "Unknown error"
+        progress_pct = 0
+
+    return BacktestStatusResponse(
+        job_id=job_id,
+        status=status,
+        progress_pct=progress_pct,
+        result_id=result_id,
+        error=error,
+    )
 
 
-@router.get("/{result_id}")
+@router.get("/results/{result_id}")
 async def get_backtest_result(
     result_id: UUID,
-    _: Annotated[TokenData, Depends(get_current_user)],
+    _: Annotated[TokenData, Depends(get_current_user)] = None,
 ) -> dict:
-    """Retrieve a completed backtest result. Implemented in Phase 1."""
-    raise NotImplementedError("Backtest engine implemented in Phase 1")
+    """
+    Retrieve a completed backtest result including metrics and all trades.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow(
+            """
+            SELECT id, strategy_id, period_start, period_end, pair, timeframe,
+                   sharpe, sortino, max_dd, win_rate, avg_r, trade_count, total_pnl,
+                   created_at
+            FROM backtest_runs WHERE id = $1
+            """,
+            result_id,
+        )
+        if run is None:
+            raise HTTPException(status_code=404, detail="Backtest result not found")
+
+        trades = await conn.fetch(
+            """
+            SELECT id, entry_time, exit_time, direction,
+                   entry_price, exit_price, pnl, r_multiple, mae, mfe, signal_context
+            FROM trades WHERE backtest_run_id = $1
+            ORDER BY entry_time ASC
+            """,
+            result_id,
+        )
+
+    return {
+        "id": str(run["id"]),
+        "strategy_id": str(run["strategy_id"]),
+        "period_start": run["period_start"].isoformat(),
+        "period_end": run["period_end"].isoformat(),
+        "pair": run["pair"],
+        "timeframe": run["timeframe"],
+        "metrics": {
+            "sharpe": run["sharpe"],
+            "sortino": run["sortino"],
+            "max_dd": run["max_dd"],
+            "win_rate": run["win_rate"],
+            "avg_r": run["avg_r"],
+            "trade_count": run["trade_count"],
+            "total_pnl": run["total_pnl"],
+        },
+        "created_at": run["created_at"].isoformat(),
+        "trades": [
+            {
+                "id": str(t["id"]),
+                "entry_time": t["entry_time"].isoformat(),
+                "exit_time": t["exit_time"].isoformat(),
+                "direction": t["direction"],
+                "entry_price": float(t["entry_price"]),
+                "exit_price": float(t["exit_price"]),
+                "pnl": float(t["pnl"]),
+                "r_multiple": float(t["r_multiple"]),
+                "mae": float(t["mae"]),
+                "mfe": float(t["mfe"]),
+                "signal_context": t["signal_context"],
+            }
+            for t in trades
+        ],
+    }
