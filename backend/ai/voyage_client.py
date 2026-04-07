@@ -9,6 +9,7 @@ redundant API calls for repeated content.
 import hashlib
 import json
 import logging
+from typing import cast
 
 import redis
 import voyageai
@@ -52,7 +53,7 @@ async def embed(text: str) -> list[float]:
     r = _get_redis()
     key = _cache_key(text)
 
-    cached = r.get(key)
+    cached = cast(str | None, r.get(key))
     if cached:
         return json.loads(cached)
 
@@ -84,7 +85,7 @@ async def embed_batch(texts: list[str]) -> list[list[float]]:
     """
     r = _get_redis()
     keys = [_cache_key(t) for t in texts]
-    cached_values = r.mget(keys)
+    cached_values = cast(list[str | None], r.mget(keys))
 
     missing_indices = [i for i, v in enumerate(cached_values) if v is None]
     results: list[list[float] | None] = [

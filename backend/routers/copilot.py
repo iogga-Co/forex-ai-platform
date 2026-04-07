@@ -23,6 +23,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from anthropic.types import MessageParam
+
 from ai.claude_client import extract_sir_from_response, stream_chat
 from ai.retrieval import retrieve_context
 from ai.voyage_client import embed, embed_query
@@ -149,7 +151,7 @@ async def chat(
                 )
 
             # Build messages list: inject context as a system note, then history
-            messages: list[dict[str, str]] = []
+            messages: list[MessageParam] = []
 
             if context_chunks:
                 context_text = "\n\n".join(c["content"] for c in context_chunks)

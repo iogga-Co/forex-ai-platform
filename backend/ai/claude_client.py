@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import anthropic
+from anthropic.types import MessageParam
 
 from core.config import settings
 from engine.sir import StrategyIR
@@ -107,7 +108,7 @@ def _get_client() -> anthropic.AsyncAnthropic:
 # ---------------------------------------------------------------------------
 
 async def stream_chat(
-    messages: list[dict[str, str]],
+    messages: list[MessageParam],
 ) -> AsyncIterator[str]:
     """
     Stream a conversational response from Claude.
@@ -128,7 +129,7 @@ async def stream_chat(
             yield text
 
 
-async def get_full_response(messages: list[dict[str, str]]) -> str:
+async def get_full_response(messages: list[MessageParam]) -> str:
     """
     Non-streaming version of stream_chat — returns the complete response text.
     Used for summarisation and SIR extraction where we need the full output.
