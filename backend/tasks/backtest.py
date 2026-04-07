@@ -19,6 +19,7 @@ The Celery task_id is stored in `backtest_runs.celery_task_id`.
 ON CONFLICT DO NOTHING prevents duplicate rows on retry.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -131,6 +132,21 @@ def run_backtest_task(
             run_id = data_db.insert_backtest_run(conn, run_record)
             data_db.bulk_insert_trades(conn, run_id, result.trades)
 
+        # Auto-summarise with Claude and store embedding (best-effort — never fails the job)
+        try:
+            progress(92, "Generating AI summary")
+            _generate_and_store_summary(
+                run_id=run_id,
+                strategy_description=ir_json.get("metadata", {}).get("description", ""),
+                pair=pair,
+                timeframe=timeframe,
+                period_start=period_start,
+                period_end=period_end,
+                metrics=result.metrics,
+            )
+        except Exception as exc:
+            logger.warning("Auto-summary failed (non-fatal): %s", exc)
+
         # Publish completion event — UI navigates to the result page
         publish_progress(
             r,
@@ -163,3 +179,50 @@ def run_backtest_task(
         )
         # Re-raise so Celery marks the task as FAILURE and can retry
         raise
+
+
+def _generate_and_store_summary(
+    run_id: str,
+    strategy_description: str,
+    pair: str,
+    timeframe: str,
+    period_start: str,
+    period_end: str,
+    metrics: dict,
+) -> None:
+    """
+    Generate a Claude summary and Voyage embedding for a backtest run,
+    then persist them to backtest_runs.summary_text and .embedding.
+
+    Runs synchronously inside the Celery worker via asyncio.run().
+    """
+    from ai.claude_client import summarize_backtest
+    from ai.voyage_client import embed
+
+    async def _run() -> None:
+        summary = await summarize_backtest(
+            metrics=metrics,
+            strategy_description=strategy_description,
+            pair=pair,
+            timeframe=timeframe,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        embedding = await embed(summary)
+        embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+
+        with data_db.get_sync_conn(settings.database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE backtest_runs
+                    SET summary_text = %s, embedding = %s::vector
+                    WHERE id = %s
+                    """,
+                    (summary, embedding_str, run_id),
+                )
+            conn.commit()
+
+        logger.info("Auto-summary stored for backtest run %s", run_id)
+
+    asyncio.run(_run())

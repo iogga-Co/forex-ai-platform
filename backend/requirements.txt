@@ -34,6 +34,10 @@ vectorbt==0.26.2
 plotly==5.11.0              # vectorbt 0.26.x is incompatible with plotly >=5.12 (heatmapgl removed)
 yfinance==0.2.51
 
+# Phase 2 — AI Co-Pilot
+anthropic==0.49.0
+voyageai==0.2.4
+
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0
