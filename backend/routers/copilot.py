@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ai.claude_client import extract_sir_from_response, stream_chat, summarize_backtest
+from ai.claude_client import extract_sir_from_response, stream_chat
 from ai.retrieval import retrieve_context
 from ai.voyage_client import embed, embed_query
 from core.auth import TokenData, get_current_user
