@@ -290,7 +290,7 @@ jobs:
           script: |
             cd /opt/forex-ai-platform
             git pull origin main
-            doppler run -- docker compose pull
+            doppler run -- docker compose build fastapi nextjs
             doppler run -- docker compose up -d --remove-orphans
 
       - name: Smoke test — health endpoint
