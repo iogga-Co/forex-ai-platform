@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     oanda_account_id: str
     oanda_environment: str = "practice"  # "practice" | "live"
 
+    # Operator auth (single-user system)
+    operator_password: str
+
     # Feature flags
     live_trading_enabled: bool = False
 
