@@ -292,6 +292,8 @@ jobs:
             git pull origin main
             doppler run -- docker compose build fastapi celery nextjs
             doppler run -- docker compose up -d --remove-orphans
+            # Reload nginx to flush stale upstream IPs after container rebuild
+            docker exec forex-ai-platform-nginx-1 nginx -s reload
 
       - name: Smoke test — health endpoint
         if: steps.secrets-check.outputs.available == 'true'
@@ -356,6 +358,8 @@ jobs:
             # NOTE: LIVE_TRADING_ENABLED flag state in Doppler is never
             # modified here. Enabling live trading is always a separate,
             # explicit operator action.
+            # Reload nginx to flush stale upstream IPs after container rebuild
+            docker exec forex-ai-platform-nginx-1 nginx -s reload
 
       - name: Smoke test — health endpoint
         run: |
