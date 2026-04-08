@@ -297,13 +297,17 @@ jobs:
         if: steps.secrets-check.outputs.available == 'true'
         run: |
           echo "Waiting for services to start..."
-          sleep 30
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.STAGING_HOST }}/api/health)
-          if [ "$STATUS" != "200" ]; then
-            echo "Health check failed — got HTTP $STATUS"
-            exit 1
-          fi
-          echo "Health check passed — HTTP $STATUS"
+          for i in $(seq 1 12); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.STAGING_HOST }}/api/health)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed — HTTP $STATUS (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS — retrying in 15s..."
+            sleep 15
+          done
+          echo "Health check failed after 12 attempts — last HTTP $STATUS"
+          exit 1
 
   # ===========================================================================
   # JOB 6 — Production deploy
@@ -356,10 +360,14 @@ jobs:
       - name: Smoke test — health endpoint
         run: |
           echo "Waiting for services to start..."
-          sleep 30
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.PRODUCTION_HOST }}/api/health)
-          if [ "$STATUS" != "200" ]; then
-            echo "Health check failed — got HTTP $STATUS"
-            exit 1
-          fi
-          echo "Health check passed — HTTP $STATUS"
+          for i in $(seq 1 12); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.PRODUCTION_HOST }}/api/health)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed — HTTP $STATUS (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS — retrying in 15s..."
+            sleep 15
+          done
+          echo "Health check failed after 12 attempts — last HTTP $STATUS"
+          exit 1
