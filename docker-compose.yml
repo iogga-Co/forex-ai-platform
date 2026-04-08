@@ -98,6 +98,7 @@ services:
       - OANDA_ENVIRONMENT=${OANDA_ENVIRONMENT}
       - OPERATOR_PASSWORD=${OPERATOR_PASSWORD}
       - NUMBA_CACHE_DIR=/tmp/numba_cache
+      - PYTHONPATH=/app
     depends_on:
       - timescaledb
       - redis
