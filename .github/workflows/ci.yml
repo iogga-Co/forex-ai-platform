@@ -290,14 +290,14 @@ jobs:
           script: |
             cd /opt/forex-ai-platform
             git pull origin main
-            doppler run -- docker compose build fastapi nextjs
+            doppler run -- docker compose build fastapi celery nextjs
             doppler run -- docker compose up -d --remove-orphans
 
       - name: Smoke test — health endpoint
         if: steps.secrets-check.outputs.available == 'true'
         run: |
           echo "Waiting for services to start..."
-          sleep 15
+          sleep 30
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.STAGING_HOST }}/api/health)
           if [ "$STATUS" != "200" ]; then
             echo "Health check failed — got HTTP $STATUS"
@@ -356,7 +356,7 @@ jobs:
       - name: Smoke test — health endpoint
         run: |
           echo "Waiting for services to start..."
-          sleep 15
+          sleep 30
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.PRODUCTION_HOST }}/api/health)
           if [ "$STATUS" != "200" ]; then
             echo "Health check failed — got HTTP $STATUS"

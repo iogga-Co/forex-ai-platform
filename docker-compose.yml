@@ -96,6 +96,7 @@ services:
       - OANDA_API_KEY=${OANDA_API_KEY}
       - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
       - OANDA_ENVIRONMENT=${OANDA_ENVIRONMENT}
+      - OPERATOR_PASSWORD=${OPERATOR_PASSWORD}
       - NUMBA_CACHE_DIR=/tmp/numba_cache
     depends_on:
       - timescaledb
