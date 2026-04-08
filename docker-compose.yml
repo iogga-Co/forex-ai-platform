@@ -68,6 +68,7 @@ services:
       - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
       - OANDA_ENVIRONMENT=${OANDA_ENVIRONMENT}
       - LIVE_TRADING_ENABLED=false
+      - OPERATOR_PASSWORD=${OPERATOR_PASSWORD}
       - NUMBA_CACHE_DIR=/tmp/numba_cache
     depends_on:
       - timescaledb
