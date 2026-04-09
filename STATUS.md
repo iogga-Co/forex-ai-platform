@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-06 (Phase 1 complete — all CI green, staging deployed)
+**Last updated:** 2026-04-09 (Phase 2 complete — staging deployed, data backfill in progress)
 
 ---
 
@@ -10,7 +10,7 @@
 |---|---|---|---|
 | **0** | Foundation | ✅ Complete | ✅ Health check returns 200 over HTTPS |
 | **1** | Core Engine | ✅ Complete | ✅ 58 tests pass, CI green, PR #7 merged, staging live |
-| **2** | AI Intelligence | Not started | Pending |
+| **2** | AI Intelligence | ✅ Complete | ✅ Strategy created → backtest runs → results stored. AI summary pending Anthropic credits |
 | **3** | Analytics Suite | Not started | Pending |
 | **4** | Live Trading | Not started | Pending |
 | **5** | Production Launch | Not started | Pending |
@@ -40,7 +40,7 @@
 | `ohlcv_candles` | TimescaleDB hypertable for price data |
 | `strategies` | Strategy IR versions with embeddings |
 | `conversation_turns` | Full dialog history with BM25 + vector indexes |
-| `backtest_runs` | Backtest results with metrics |
+| `backtest_runs` | Backtest results with metrics, summary_text, embedding |
 | `trades` | Per-trade granularity with MAE/MFE |
 | `live_orders` | Live execution record |
 | `alert_events` | System-wide monitoring event log |
@@ -108,39 +108,118 @@
 
 ---
 
-## Phase 2 — Next: AI Intelligence
+## Phase 2 — Complete ✅
 
-**Goal:** AI Co-Pilot produces a valid SIR from natural language, stored in RAG, retrievable by subsequent queries.
+**Gate passed 2026-04-09.** PRs #10–#18 merged. Staging deployed and smoke test passing.
+Strategy creation → backtest execution → results stored confirmed end-to-end.
+AI auto-summary is implemented but currently blocked by Anthropic API credit balance.
+
+### What was built
+
+**New packages:**
+- `anthropic==0.49.0` — Claude API client with streaming support
+- `voyageai==0.2.4` — Voyage AI embedding client
+- `pytest-asyncio==0.24.0` — async test support
+
+**New DB migration (applied manually — was not in initial schema):**
+- `db/migrations/009_backtest_runs_task_id.sql` — applied to staging via `psql` directly
+
+**AI layer:**
+- `backend/ai/__init__.py` — package init
+- `backend/ai/claude_client.py` — Anthropic streaming client; `stream_chat()`, `extract_sir_from_response()`, `summarize_backtest()`; uses ` ```sir ` fenced block format for SIR proposals
+- `backend/ai/voyage_client.py` — Voyage AI 1024-dim embeddings with Redis cache (TTL=7d)
+- `backend/ai/retrieval.py` — hybrid RAG: pgvector cosine similarity + BM25 full-text, fused with RRF (`_TOP_N=6`, `_RRF_K=60`)
+
+**API:**
+- `backend/routers/copilot.py` — `POST /api/copilot/chat` (SSE stream: `text`/`sir`/`error`/`done` events), `GET /api/copilot/sessions/{id}`
+- `backend/main.py` — registered copilot router
+
+**Config:**
+- `backend/core/config.py` — added `operator_password: str` field to Settings
+
+**Celery:**
+- `backend/tasks/backtest.py` — added `_generate_and_store_summary()`: auto-summarises with Claude, embeds with Voyage, stores `summary_text` + `embedding` on `backtest_runs` (best-effort, non-fatal)
+
+**Frontend:**
+- `frontend/src/app/copilot/page.tsx` — split-view chat + SIR inspector; streaming SSE parser; Save Strategy form; New Session button
+- `frontend/src/app/strategies/page.tsx` — strategies list with expandable IR viewer, Backtest link, loading skeletons, empty state
+
+**Tests (11 new, all passing):**
+- `backend/tests/test_copilot.py` — SIR extraction (4 tests), RRF fusion (3 tests), Voyage cache hit/miss (2 tests), summarisation (1 test), router 404 (1 test)
+
+**Infrastructure fixes (PRs #11–#18):**
+- `NUMBA_CACHE_DIR=/tmp/numba_cache` added to fastapi + celery services
+- `OPERATOR_PASSWORD` added to fastapi + celery services
+- `PYTHONPATH=/app` added to celery service (ForkPoolWorker changes working directory)
+- CI deploy: `docker compose pull` → `docker compose build fastapi celery nextjs`
+- CI deploy: added `nginx -s reload` after `docker compose up` to flush stale upstream IPs
+- CI smoke test: replaced flat `sleep 30` with retry loop (12 × 15s = 3 min max)
+
+### Key lessons from Phase 2
+- Celery `ForkPoolWorker` changes working directory — lazy imports fail without `PYTHONPATH=/app`
+- Nginx caches upstream IPs at startup — must run `nginx -s reload` after container rebuilds or `proxy_pass` returns 502
+- `voyageai` latest version is `0.2.4`, not `0.3.x` — pin explicitly
+- Mypy: Redis `get()`/`mget()` return `Awaitable[Any] | Any` — requires `cast(str | None, ...)`
+- Anthropic SDK: use `MessageParam` from `anthropic.types` for typed message lists
+- TimescaleDB `initdb` migrations only run on a fresh volume — new migration files must be applied manually with `psql` on existing staging DB
+- Contabo VPS has a network-level firewall separate from `ufw` — both must allow port 22
+
+### Data backfill status (as of 2026-04-09)
+| Pair | 1m | 1H | Coverage |
+|---|---|---|---|
+| EURUSD | ✅ 1.86M candles | ✅ 31K candles | Apr 2021 – Apr 2026 |
+| GBPUSD | ✅ 1.86M candles | ✅ 31K candles | Apr 2021 – Apr 2026 |
+| USDJPY | ✅ 1.86M candles | ✅ 31K candles | Apr 2021 – Apr 2026 |
+| EURGBP | ✅ 1.85M candles | 🔄 in progress | 1m complete; 1H ~Sep 2025 |
+| GBPJPY | ❌ pending | ❌ pending | Queued after EURGBP |
+
+---
+
+## Phase 3 — Next: Analytics Suite
+
+**Goal:** Rich backtest analytics and performance visualisation — equity curves, trade distribution, drawdown charts, multi-strategy comparison, ClickHouse aggregation for fast queries.
 
 ### What to build
-- Claude API integration — system prompt with SIR schema, indicator descriptions, risk rules
-- Voyage AI embedding service — wraps Voyage AI API, caches in Redis
-- pgvector + BM25 hybrid retrieval — `conversation_turns`, `strategies`, `backtest_runs`
-- Auto-summary pipeline — Claude summarises each backtest result, stored with embedding
-- Conversation endpoint — embed → retrieve → assemble prompt → stream response
-- SIR editor — parse Claude's proposed SIR update, validate, diff, store new version
-- Co-Pilot frontend panel — chat history + Strategy IR inspector with version history
+- ClickHouse schema + ETL — write backtest_runs + trades to ClickHouse after each job
+- Analytics API — equity curve, drawdown series, trade scatter, rolling Sharpe
+- Backtest results page — full charts, trade table with filters, export to CSV
+- Multi-strategy comparison — overlay equity curves, rank by metric
+- Grafana dashboards — system health, backtest throughput, trade metrics
 
-### Before starting Phase 2 (optional but recommended)
-Run the backfill script on staging to load 5yr historical data (~2h, idempotent):
-```bash
-ssh deploy@86.48.16.255 "cd /opt/forex-ai-platform && doppler run -- python backend/scripts/backfill.py"
-```
+### Gate test
+Open a completed backtest result page and confirm: equity curve renders, trade table loads, all metrics display correctly.
 
-Then seed a test strategy and run an E2E backtest to confirm the full stack on real data:
-```bash
-# 1. Create a test strategy
-curl -X POST https://trading.iogga-co.com/api/strategies \
-  -H "Authorization: Bearer <jwt>" \
-  -H "Content-Type: application/json" \
-  -d @backend/tests/fixtures/golden_strategy.json
+---
 
-# 2. Run a backtest (replace strategy_id and session_id)
-curl -X POST "https://trading.iogga-co.com/api/backtest?session_id=test123" \
-  -H "Authorization: Bearer <jwt>" \
-  -H "Content-Type: application/json" \
-  -d '{"strategy_id":"<uuid>","period_start":"2020-01-01","period_end":"2024-01-01","pair":"EURUSD","timeframe":"1H"}'
-```
+## Phase 4 — Live Trading
+
+**Goal:** Paper → live order execution via OANDA. Single feature flag (`LIVE_TRADING_ENABLED`) controls the switch.
+
+### What to build
+- OANDA streaming price feed — replace Redis mock with real tick data
+- Order execution engine — translate SIR signals to OANDA market/limit orders
+- Live position monitor — WebSocket feed to frontend, P&L in real time
+- Kill switch — operator endpoint to flatten all positions immediately
+- Live trading page — position table, open orders, equity ticker
+
+### Gate test
+Place a paper trade on OANDA practice account and confirm order appears in the live trading page.
+
+---
+
+## Phase 5 — Production Launch
+
+**Goal:** Harden, monitor, and cut over to production VPS with real money disabled by default.
+
+### What to build
+- Production VPS provisioning (separate server from staging)
+- Grafana alerting — latency, error rate, drawdown breach
+- Log aggregation — structured JSON logs shipped to persistent storage
+- `LIVE_TRADING_ENABLED` operator runbook — step-by-step checklist before enabling real money
+- Load test — confirm system handles 100 concurrent WebSocket connections
+
+### Gate test
+Production smoke test passes. Grafana dashboard shows all green. Runbook reviewed.
 
 ---
 
@@ -158,14 +237,23 @@ curl -X POST "https://trading.iogga-co.com/api/backtest?session_id=test123" \
 
 ### Useful commands
 ```bash
+# SSH (specify key explicitly — Contabo network firewall may block unknown IPs)
+ssh -i ~/.ssh/forex-ai-deploy -o IdentitiesOnly=yes deploy@trading.iogga-co.com
+
 # Check service status
-ssh deploy@86.48.16.255 "cd /opt/forex-ai-platform && doppler run -- docker compose ps"
+ssh -i ~/.ssh/forex-ai-deploy -o IdentitiesOnly=yes deploy@trading.iogga-co.com \
+  "cd /opt/forex-ai-platform && docker compose ps"
 
 # View logs
-ssh deploy@86.48.16.255 "cd /opt/forex-ai-platform && doppler run -- docker compose logs fastapi --tail=50"
+ssh -i ~/.ssh/forex-ai-deploy -o IdentitiesOnly=yes deploy@trading.iogga-co.com \
+  "docker compose -f /opt/forex-ai-platform/docker-compose.yml logs fastapi --tail=50"
 
 # Health check
 curl https://trading.iogga-co.com/api/health
+
+# Check backfill progress
+ssh -i ~/.ssh/forex-ai-deploy -o IdentitiesOnly=yes deploy@trading.iogga-co.com \
+  "docker exec forex-ai-platform-fastapi-1 tail -f /tmp/backfill.log"
 ```
 
 ---
