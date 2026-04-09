@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
 // ---------------------------------------------------------------------------
@@ -201,6 +202,7 @@ function SirInspector({
 // Main page
 // ---------------------------------------------------------------------------
 export default function CopilotPage() {
+  const router = useRouter();
   const [sessionId, setSessionId] = useState<string>(() => getOrCreateSessionId());
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
@@ -208,6 +210,13 @@ export default function CopilotPage() {
   const [pendingAssistant, setPendingAssistant] = useState("");
   const [sirProposal, setSirProposal] = useState<SirProposal | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!localStorage.getItem("access_token")) {
+      router.push("/login");
+    }
+  }, [router]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -243,6 +252,10 @@ export default function CopilotPage() {
         body: JSON.stringify({ session_id: sessionId, message }),
       });
 
+      if (res.status === 401) {
+        router.push("/login");
+        return;
+      }
       if (!res.ok || !res.body) {
         throw new Error(`HTTP ${res.status}`);
       }
