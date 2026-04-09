@@ -115,8 +115,8 @@ def extract_trades(
     low = df["low"]
 
     for i, (_, row) in enumerate(records_readable.iterrows()):
-        entry_idx = int(raw_records[i]["entry_idx"])
-        exit_idx = int(raw_records[i]["exit_idx"])
+        entry_idx = int(raw_records.iloc[i]["entry_idx"])
+        exit_idx = int(raw_records.iloc[i]["exit_idx"])
 
         entry_time = df.index[entry_idx]
         exit_time = df.index[exit_idx]
