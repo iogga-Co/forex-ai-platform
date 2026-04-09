@@ -160,6 +160,9 @@ async def list_backtest_results(
             """,
             limit,
         )
+    def _f(v: object) -> float | None:
+        return float(v) if v is not None else None  # type: ignore[arg-type]
+
     return [
         {
             "id": str(r["id"]),
@@ -168,11 +171,11 @@ async def list_backtest_results(
             "timeframe": r["timeframe"],
             "period_start": r["period_start"].isoformat(),
             "period_end": r["period_end"].isoformat(),
-            "sharpe": r["sharpe"],
-            "max_dd": r["max_dd"],
-            "win_rate": r["win_rate"],
+            "sharpe": _f(r["sharpe"]),
+            "max_dd": _f(r["max_dd"]),
+            "win_rate": _f(r["win_rate"]),
             "trade_count": r["trade_count"],
-            "total_pnl": r["total_pnl"],
+            "total_pnl": _f(r["total_pnl"]) or 0.0,
             "created_at": r["created_at"].isoformat(),
         }
         for r in rows
