@@ -111,19 +111,27 @@ def test_clickhouse_init_schema_does_not_raise_on_error():
 # Analytics router — equity-curve endpoint (mocked DB)
 # ---------------------------------------------------------------------------
 
+def _make_pool_mock(mock_conn: AsyncMock) -> MagicMock:
+    """Build a pool mock where acquire() returns a working async context manager."""
+    acquire_ctx = MagicMock()
+    acquire_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+    acquire_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value = acquire_ctx
+    return mock_pool
+
+
 @pytest.mark.asyncio
 async def test_equity_curve_endpoint_404():
     from fastapi import HTTPException
     from routers.analytics import equity_curve
     from uuid import uuid4
 
-    mock_pool = AsyncMock()
     mock_conn = AsyncMock()
     mock_conn.fetchval.return_value = None  # run not found
-    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+    mock_pool = _make_pool_mock(mock_conn)
 
-    with patch("routers.analytics.get_pool", return_value=AsyncMock(return_value=mock_pool)):
+    with patch("routers.analytics.get_pool", new=AsyncMock(return_value=mock_pool)):
         with pytest.raises(HTTPException) as exc_info:
             await equity_curve(uuid4())
     assert exc_info.value.status_code == 404
@@ -135,22 +143,18 @@ async def test_equity_curve_endpoint_returns_points():
     from uuid import uuid4
 
     now = datetime(2020, 1, 5, 10, 0, tzinfo=timezone.utc)
+    # Use dicts so t["pnl"] and t["entry_time"].isoformat() both work
     fake_trades = [
-        MagicMock(pnl=500.0, entry_time=now),
-        MagicMock(pnl=-200.0, entry_time=now),
+        {"pnl": 500.0, "entry_time": now},
+        {"pnl": -200.0, "entry_time": now},
     ]
-    for t in fake_trades:
-        t.__getitem__ = lambda self, key: getattr(self, key)
 
     mock_conn = AsyncMock()
     mock_conn.fetchval.return_value = 1  # run exists
     mock_conn.fetch.return_value = fake_trades
+    mock_pool = _make_pool_mock(mock_conn)
 
-    mock_pool = AsyncMock()
-    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
-
-    with patch("routers.analytics.get_pool", return_value=AsyncMock(return_value=mock_pool)):
+    with patch("routers.analytics.get_pool", new=AsyncMock(return_value=mock_pool)):
         result = await equity_curve(uuid4())
 
     assert "points" in result
