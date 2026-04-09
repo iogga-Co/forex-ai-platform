@@ -1,6 +1,11 @@
+import logging
+
 from celery import Celery
+from celery.signals import worker_ready
 
 from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 celery_app = Celery(
     "forex_ai",
@@ -20,3 +25,13 @@ celery_app.conf.update(
     task_time_limit=1200,       # 20 min hard limit — task is killed
     worker_prefetch_multiplier=1,  # One task at a time per worker (CPU-bound)
 )
+
+
+@worker_ready.connect
+def on_worker_ready(**_kwargs: object) -> None:
+    """Ensure ClickHouse schema exists when the worker starts."""
+    try:
+        from core.clickhouse import init_schema
+        init_schema()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ClickHouse init_schema failed (non-fatal): %s", exc)
