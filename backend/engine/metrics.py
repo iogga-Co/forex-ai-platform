@@ -102,21 +102,21 @@ def extract_trades(
     MAE and MFE are computed from the raw OHLCV data for each trade's holding
     period, giving the true maximum adverse/favorable price excursion.
     """
-    records = portfolio.trades.records_readable
-    if records.empty:
+    records_readable = portfolio.trades.records_readable
+    if records_readable.empty:
         return []
+
+    # Use raw integer positions from portfolio.trades.records to avoid
+    # timezone-mismatch KeyErrors when matching timestamps via get_loc.
+    raw_records = portfolio.trades.records
 
     trade_list: list[dict] = []
     high = df["high"]
     low = df["low"]
 
-    for _, row in records.iterrows():
-        try:
-            entry_idx = df.index.get_loc(row["Entry Index"])
-            exit_idx = df.index.get_loc(row["Exit Index"])
-        except KeyError:
-            logger.warning("Trade index not found in OHLCV DataFrame, skipping")
-            continue
+    for i, (_, row) in enumerate(records_readable.iterrows()):
+        entry_idx = int(raw_records.iloc[i]["entry_idx"])
+        exit_idx = int(raw_records.iloc[i]["exit_idx"])
 
         entry_time = df.index[entry_idx]
         exit_time = df.index[exit_idx]
