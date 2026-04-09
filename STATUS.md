@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-09 (Phase 2 complete — staging deployed, data backfill in progress)
+**Last updated:** 2026-04-09 (Phase 3 complete — analytics suite deployed, gate test passed)
 
 ---
 
@@ -11,7 +11,7 @@
 | **0** | Foundation | ✅ Complete | ✅ Health check returns 200 over HTTPS |
 | **1** | Core Engine | ✅ Complete | ✅ 58 tests pass, CI green, PR #7 merged, staging live |
 | **2** | AI Intelligence | ✅ Complete | ✅ Strategy created → backtest runs → results stored. AI summary pending Anthropic credits |
-| **3** | Analytics Suite | Not started | Pending |
+| **3** | Analytics Suite | ✅ Complete | ✅ 283 trades, 283 equity curve points, /api/analytics endpoints live |
 | **4** | Live Trading | Not started | Pending |
 | **5** | Production Launch | Not started | Pending |
 
@@ -175,19 +175,39 @@ AI auto-summary is implemented but currently blocked by Anthropic API credit bal
 
 ---
 
-## Phase 3 — Next: Analytics Suite
+## Phase 3 — Complete ✅
 
-**Goal:** Rich backtest analytics and performance visualisation — equity curves, trade distribution, drawdown charts, multi-strategy comparison, ClickHouse aggregation for fast queries.
+**Gate passed 2026-04-09.** PRs #20–#22 merged. Staging deployed. Gate test: 283 trades stored, equity curve returns 283 points with correct PnL/drawdown series.
 
-### What to build
-- ClickHouse schema + ETL — write backtest_runs + trades to ClickHouse after each job
-- Analytics API — equity curve, drawdown series, trade scatter, rolling Sharpe
-- Backtest results page — full charts, trade table with filters, export to CSV
-- Multi-strategy comparison — overlay equity curves, rank by metric
-- Grafana dashboards — system health, backtest throughput, trade metrics
+### What was built
 
-### Gate test
-Open a completed backtest result page and confirm: equity curve renders, trade table loads, all metrics display correctly.
+**Backend:**
+- `backend/core/clickhouse.py` — ClickHouse client with `backtest_metrics` + `backtest_trades` ReplacingMergeTree tables; `write_backtest_run()` called best-effort after PostgreSQL insert
+- `backend/routers/analytics.py` — three endpoints: equity curve (`/backtest/{id}/equity-curve`), CSV export, strategy comparison
+- `backend/tasks/backtest.py` — ClickHouse ETL hook after DB insert
+- `backend/main.py` — analytics router registered
+- `backend/tests/test_analytics.py` — 9 tests covering equity math, ClickHouse failure tolerance, endpoint 404/200
+
+**Grafana:**
+- `grafana/provisioning/` — Prometheus datasource + dashboard file provider
+- `grafana/dashboards/system.json` — HTTP rate, p95 latency, error rate, Celery tasks
+- `grafana/dashboards/backtests.json` — backtest throughput, endpoint latency, copilot calls
+
+**Key fixes during Phase 3:**
+- asyncpg 0.30 returns `jsonb` as raw strings by default — registered json/jsonb type codecs on pool init (fixed 500 on GET /api/strategies)
+- `vectorbt.trades.records_readable` Entry/Exit Index timestamps fail `df.index.get_loc()` due to timezone round-trip — switched to `records.iloc[i]["entry_idx"]` integer positions (fixed all trades silently skipped)
+- ClickHouse `init_schema()` was never called — added `worker_ready` signal in `celery_app.py`
+- Frontend `useRef` missing from React imports (CI TypeScript error)
+- `package-lock.json` not regenerated after adding recharts (CI npm ci error)
+
+### Data backfill status (as of 2026-04-09)
+| Pair | 1m | 1H | Coverage |
+|---|---|---|---|
+| EURUSD | ✅ 1.86M candles | ✅ 31K candles | Apr 2021 – Apr 2026 |
+| GBPUSD | ✅ 1.86M candles | ✅ 31K candles | Apr 2021 – Apr 2026 |
+| USDJPY | ✅ 1.86M candles | ✅ 31K candles | Apr 2021 – Apr 2026 |
+| EURGBP | ✅ 1.85M candles | 🔄 in progress | 1m complete; 1H downloading |
+| GBPJPY | ❌ pending | ❌ pending | Queued after EURGBP 1H |
 
 ---
 
