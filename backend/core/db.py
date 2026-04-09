@@ -16,9 +16,27 @@ Usage:
             row = await conn.fetchrow("SELECT ...")
 """
 
+import json
+
 import asyncpg
 
 _pool: asyncpg.Pool | None = None
+
+
+async def _init_conn(conn: asyncpg.Connection) -> None:
+    """Register JSON/JSONB codecs so columns decode to Python dicts automatically."""
+    await conn.set_type_codec(
+        "jsonb",
+        encoder=json.dumps,
+        decoder=json.loads,
+        schema="pg_catalog",
+    )
+    await conn.set_type_codec(
+        "json",
+        encoder=json.dumps,
+        decoder=json.loads,
+        schema="pg_catalog",
+    )
 
 
 async def init_pool(dsn: str) -> None:
@@ -29,6 +47,7 @@ async def init_pool(dsn: str) -> None:
         min_size=2,
         max_size=10,
         command_timeout=60,
+        init=_init_conn,
     )
 
 
