@@ -85,10 +85,15 @@ function SirInspector({
     setSaveState("saving");
     setSaveError("");
 
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+
     try {
       const res = await fetch(`${API_BASE}/api/strategies`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           ir_json: sir,
           description: description.trim(),
@@ -226,10 +231,15 @@ export default function CopilotPage() {
     setStreaming(true);
     setPendingAssistant("");
 
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+
     try {
       const res = await fetch(`${API_BASE}/api/copilot/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ session_id: sessionId, message }),
       });
 
