@@ -1,9 +1,10 @@
 """
 Backtest API endpoints — Phase 1 implementation.
 
-POST /api/backtest          — dispatch a Celery backtest job
+POST /api/backtest                       — dispatch a Celery backtest job
 GET  /api/backtest/jobs/{job_id}/status  — poll job status
-GET  /api/backtest/results/{result_id}   — fetch completed result
+GET  /api/backtest/results               — list past results (most recent first)
+GET  /api/backtest/results/{result_id}   — fetch completed result with trades
 """
 
 import logging
@@ -134,6 +135,48 @@ async def get_backtest_status(
         result_id=result_id,
         error=error,
     )
+
+
+@router.get("/results")
+async def list_backtest_results(
+    limit: int = Query(default=20, ge=1, le=100),
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
+) -> list[dict]:
+    """
+    List completed backtest runs, most recent first.
+    Returns summary rows (no trades) for the history view.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, strategy_id, pair, timeframe,
+                   period_start, period_end,
+                   sharpe, max_dd, win_rate, trade_count, total_pnl,
+                   created_at
+            FROM backtest_runs
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    return [
+        {
+            "id": str(r["id"]),
+            "strategy_id": str(r["strategy_id"]),
+            "pair": r["pair"],
+            "timeframe": r["timeframe"],
+            "period_start": r["period_start"].isoformat(),
+            "period_end": r["period_end"].isoformat(),
+            "sharpe": r["sharpe"],
+            "max_dd": r["max_dd"],
+            "win_rate": r["win_rate"],
+            "trade_count": r["trade_count"],
+            "total_pnl": r["total_pnl"],
+            "created_at": r["created_at"].isoformat(),
+        }
+        for r in rows
+    ]
 
 
 @router.get("/results/{result_id}")

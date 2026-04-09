@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Area,
@@ -103,6 +103,7 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
 // ---------------------------------------------------------------------------
 export default function BacktestResultPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,7 +114,11 @@ export default function BacktestResultPage() {
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
-    if (!id || !token) return;
+    if (!id) return;
+    if (!token) {
+      router.push(`/login`);
+      return;
+    }
 
     Promise.all([
       fetch(`/api/backtest/results/${id}`, {
