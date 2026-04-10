@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/backtest", tags=["Backtest"])
 
 
+def _f(v: object) -> float | None:
+    """Cast asyncpg Decimal/NUMERIC to float for JSON serialisation."""
+    return float(v) if v is not None else None  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
@@ -160,9 +165,6 @@ async def list_backtest_results(
             """,
             limit,
         )
-    def _f(v: object) -> float | None:
-        return float(v) if v is not None else None  # type: ignore[arg-type]
-
     return [
         {
             "id": str(r["id"]),
@@ -222,13 +224,13 @@ async def get_backtest_result(
         "pair": run["pair"],
         "timeframe": run["timeframe"],
         "metrics": {
-            "sharpe": run["sharpe"],
-            "sortino": run["sortino"],
-            "max_dd": run["max_dd"],
-            "win_rate": run["win_rate"],
-            "avg_r": run["avg_r"],
+            "sharpe": _f(run["sharpe"]),
+            "sortino": _f(run["sortino"]),
+            "max_dd": _f(run["max_dd"]),
+            "win_rate": _f(run["win_rate"]),
+            "avg_r": _f(run["avg_r"]),
             "trade_count": run["trade_count"],
-            "total_pnl": run["total_pnl"],
+            "total_pnl": _f(run["total_pnl"]),
         },
         "created_at": run["created_at"].isoformat(),
         "trades": [
