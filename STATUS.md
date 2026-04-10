@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-10 (code quality pass: JPY pip fix, per-pair fees, RAG score threshold, ClickHouse removed, SQL equity curve)
+**Last updated:** 2026-04-10 (UI bug fixes: strategy names, Co-Pilot save, global auth guard)
 
 ---
 
@@ -41,7 +41,7 @@
 | USDJPY | ✅ 1,859,916 | ✅ 31,130 | Apr 2021 – Apr 2026 |
 | EURGBP | ✅ 1,854,281 | ✅ 31,129 | Apr 2021 – Apr 2026 |
 | GBPJPY | ✅ 1,857,964 | ✅ 31,139 | Apr 2021 – Apr 2026 |
-| USDCHF | 🔄 downloading | 🔄 downloading | Triggered 2026-04-10; ~1.85M bars expected |
+| USDCHF | 🔄 downloading | 🔄 downloading | Backfill running on staging since 2026-04-10 23:14 UTC; ~1.85M bars expected |
 
 ---
 
@@ -51,7 +51,7 @@
 
 ### Deliverables
 - GitHub repo with branch protection — CI must pass before merge (6 jobs)
-- Docker Compose — 9 services: nginx, fastapi, celery, nextjs, timescaledb, clickhouse, redis, prometheus, grafana
+- Docker Compose — 8 services: nginx, fastapi, celery, nextjs, timescaledb, redis, prometheus, grafana (ClickHouse removed in code quality pass)
 - Doppler secrets management — `development` and `staging` configs
 - Staging VPS (Contabo, Ubuntu 24.04, 86.48.16.255) with UFW + Contabo network firewall (both must allow port 22)
 - SSL via Let's Encrypt — `trading.iogga-co.com`, expires 2026-07-04
@@ -295,11 +295,13 @@ curl https://trading.iogga-co.com/api/health
 docker exec forex-ai-platform-timescaledb-1 sh -c \
   'psql -U $POSTGRES_USER $POSTGRES_DB -c "SELECT pair, timeframe, COUNT(*), MAX(timestamp)::date FROM ohlcv_candles GROUP BY pair, timeframe ORDER BY pair, timeframe;"'
 
-# Resume backfill (run inside fastapi container)
-docker exec -d forex-ai-platform-fastapi-1 bash -c \
-  'BACKFILL_PAIRS=EURGBP BACKFILL_TIMEFRAMES=1H python /app/scripts/backfill.py > /tmp/backfill_eurgbp_1h.log 2>&1'
-docker exec -d forex-ai-platform-fastapi-1 bash -c \
-  'BACKFILL_PAIRS=GBPJPY python /app/scripts/backfill.py > /tmp/backfill_gbpjpy.log 2>&1'
+# Resume/trigger backfill for any pair (run inside fastapi container)
+# Script path is /app/scripts/backfill.py  (NOT /app/backend/scripts/backfill.py)
+docker exec forex-ai-platform-fastapi-1 bash -c \
+  'BACKFILL_PAIRS=USDCHF python scripts/backfill.py' > /tmp/usdchf_backfill.log 2>&1 &
+
+# Watch USDCHF backfill progress
+tail -f /tmp/usdchf_backfill.log
 ```
 
 ---
@@ -371,12 +373,16 @@ Test count: **80 passed** (up from 58 at Phase 1 gate).
 | #29 | Fix `IndeterminateDatatypeError` in RAG retrieval — split shared params per query |
 | #30 | Add USDCHF as sixth trading pair (backfill script + frontend) |
 | #31 | Rotate Anthropic API key (GitHub secret updated) |
-| #32 | Cast NUMERIC→float in `GET /api/backtest/results/{id}` (detail endpoint) — pending merge |
+| #32 | Cast NUMERIC→float in `GET /api/backtest/results/{id}` (detail endpoint) ✅ merged |
+| #33 | Strategy names in backtest dropdown; `Authorization` header on Strategies page; Co-Pilot save pre-fills description from `metadata.description`; Claude system prompt updated to always emit `metadata.description` in SIR ✅ merged |
+| #34 | Global `AuthGuard` in root layout — suppresses render until token check completes ✅ merged |
+| #35 | Synchronous auth redirect — check runs in `useState` initializer before first paint; unauthenticated users land on `/login` immediately with no blank flash ✅ merged |
 
-## Open Items (non-blocking)
+---
+
+## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| PR #32 merge | High | Fixes "Application error" on backtest result detail page — awaiting CI green |
-| USDCHF backfill | Low | Triggered 2026-04-10; ~10–15 min. Re-run if needed: `docker exec forex-ai-platform-backend-1 bash -c 'BACKFILL_PAIRS=USDCHF python backend/scripts/backfill.py'` |
-| Co-Pilot end-to-end test | Medium | New Anthropic key deployed via PR #31. Verify chat works end-to-end on staging |
+| USDCHF backfill | High | Running on staging since 2026-04-10 23:14 UTC. Monitor: `ssh root@86.48.16.255 "tail -f /tmp/usdchf_backfill.log"`. Check progress: `ssh root@86.48.16.255 "docker exec forex-ai-platform-timescaledb-1 psql -U forex_user -d forex_db -c 'SELECT timeframe, COUNT(*), MAX(timestamp)::date as latest FROM ohlcv_candles WHERE pair='\''USDCHF'\'' GROUP BY timeframe;'"` |
+| Phase 4 — Live Trading | Next | All 6 pairs must have data before starting. Begin once USDCHF backfill completes. |
