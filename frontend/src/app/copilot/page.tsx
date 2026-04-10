@@ -17,6 +17,7 @@ interface SirProposal {
   exit_conditions: unknown;
   filters?: unknown;
   position_sizing?: unknown;
+  metadata?: { description?: string; version?: number };
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -77,7 +78,7 @@ function SirInspector({
 }) {
   const [pair, setPair] = useState("EURUSD");
   const [timeframe, setTimeframe] = useState("1H");
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(sir.metadata?.description ?? "");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
 
@@ -136,7 +137,7 @@ function SirInspector({
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Strategy description…"
+          placeholder="Strategy name / description (required to save)…"
           className="w-full rounded-md bg-surface border border-surface-border px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-accent"
         />
         <div className="flex gap-2">

@@ -63,6 +63,9 @@ SIR schema:
   "position_sizing": {
     "risk_per_trade_pct": <float 0-10>,
     "max_size_units": <integer>
+  },
+  "metadata": {
+    "description": "<one-line human-readable summary of the strategy>"
   }
 }
 ```
@@ -77,6 +80,7 @@ SIR schema:
 - price_above / price_below operators do not use a `value` field.
 - Threshold operators (>, <, >=, <=, ==, crossed_above, crossed_below) require a `value` field.
 - risk_per_trade_pct should never exceed 2% for conservative strategies, 5% for aggressive.
+- Always include a `metadata.description` field: a concise one-line summary of the strategy (e.g. "RSI momentum with EMA trend filter, ATR exits on EURUSD 1H").
 
 ## Output format
 
