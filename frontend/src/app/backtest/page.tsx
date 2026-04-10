@@ -34,7 +34,7 @@ interface RunSummary {
   created_at: string;
 }
 
-const PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY"];
+const PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"];
 const TIMEFRAMES = ["1m", "1H"];
 
 function fmt(v: number | null, d = 2) {
