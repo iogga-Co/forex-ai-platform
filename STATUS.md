@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-09 (Phase 3 complete — analytics suite deployed and gate-tested)
+**Last updated:** 2026-04-10 (code quality pass: JPY pip fix, per-pair fees, RAG score threshold, ClickHouse removed, SQL equity curve)
 
 ---
 
@@ -10,25 +10,27 @@
 |---|---|---|---|
 | **0** | Foundation | ✅ Complete | ✅ Health check returns 200 over HTTPS |
 | **1** | Core Engine | ✅ Complete | ✅ 58 tests pass, CI green, PR #7 merged, staging live |
-| **2** | AI Intelligence | ✅ Complete | ✅ Strategy created → backtest runs → results stored. AI summary pending Anthropic credits |
+| **2** | AI Intelligence | ✅ Complete | ✅ Strategy created → backtest runs → results stored. AI summary live (Anthropic key updated 2026-04-10) |
 | **3** | Analytics Suite | ✅ Complete | ✅ 283 trades stored, equity curve 283 pts, all /api/analytics endpoints live |
 | **4** | Live Trading | 🔲 Next | Pending |
 | **5** | Production Launch | 🔲 Pending | Pending |
 
 ---
 
-## Current Staging State (2026-04-09)
+## Current Staging State (2026-04-10)
 
 | Item | Value |
 |---|---|
 | URL | https://trading.iogga-co.com |
 | Health | ✅ 200 OK |
-| Services | All 9 up (nginx, fastapi, celery, nextjs, timescaledb, clickhouse, redis, prometheus, grafana) |
+| Services | All 8 up (nginx, fastapi, celery, nextjs, timescaledb, redis, prometheus, grafana) — ClickHouse removed |
 | Strategies in DB | 1 (Golden RSI+EMA, EURUSD 1H) |
-| Backtest runs in DB | 4 |
-| Trades in DB | 283 (from last gate-test run) |
+| Backtest runs in DB | 4+ |
+| Trades in DB | 283+ |
 | OANDA mode | `practice` (demo account, account 001-001-21125823-001) |
 | `LIVE_TRADING_ENABLED` | `false` |
+| Anthropic API | ✅ Key updated — credits available |
+| Voyage AI | ✅ Payment method added — 300 RPM / 1M TPM |
 
 ### OHLCV Data Coverage
 
@@ -37,8 +39,9 @@
 | EURUSD | ✅ 1,857,300 | ✅ 31,134 | Apr 2021 – Apr 2026 |
 | GBPUSD | ✅ 1,857,406 | ✅ 31,143 | Apr 2021 – Apr 2026 |
 | USDJPY | ✅ 1,859,916 | ✅ 31,130 | Apr 2021 – Apr 2026 |
-| EURGBP | ✅ 1,854,281 | 🔄 downloading | 1m: Apr 2021–Apr 2026; 1H: in progress |
-| GBPJPY | ❌ | ❌ | Queued after EURGBP 1H |
+| EURGBP | ✅ 1,854,281 | ✅ 31,129 | Apr 2021 – Apr 2026 |
+| GBPJPY | ✅ 1,857,964 | ✅ 31,139 | Apr 2021 – Apr 2026 |
+| USDCHF | 🔄 downloading | 🔄 downloading | Triggered 2026-04-10; ~1.85M bars expected |
 
 ---
 
@@ -112,9 +115,8 @@
 **Gate passed 2026-04-09.** PRs #20–#23 merged. EURUSD 1H backtest: 283 trades, equity curve 283 points, correct drawdown series.
 
 ### Deliverables
-- `backend/core/clickhouse.py` — ClickHouse client; `backtest_metrics` + `backtest_trades` ReplacingMergeTree tables; `write_backtest_run()` called best-effort after PostgreSQL insert; `init_schema()` called at Celery `worker_ready`
-- `backend/routers/analytics.py` — `GET /api/analytics/backtest/{id}/equity-curve` (cumulative PnL + drawdown series), `GET /api/analytics/backtest/{id}/export-csv` (trades CSV), `GET /api/analytics/strategies/compare` (multi-strategy aggregation)
-- `backend/tests/test_analytics.py` — 9 tests: equity math, ClickHouse failure tolerance, async mock endpoint tests
+- `backend/routers/analytics.py` — `GET /api/analytics/backtest/{id}/equity-curve` (cumulative PnL + drawdown via SQL window functions), `GET /api/analytics/backtest/{id}/export-csv` (trades CSV), `GET /api/analytics/strategies/compare` (multi-strategy aggregation)
+- `backend/tests/test_analytics.py` — async mock endpoint tests for equity curve, empty trades, 404
 - `grafana/provisioning/` — Prometheus datasource + dashboard file provider
 - `grafana/dashboards/system.json` — HTTP rate/latency/errors, Celery active tasks, uptime
 - `grafana/dashboards/backtests.json` — backtest throughput, p95 latency, copilot calls/min
@@ -308,8 +310,16 @@ docker exec -d forex-ai-platform-fastapi-1 bash -c \
 # Start all services with hot reload
 doppler run -- docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
-# Run backend tests
-cd backend && pytest tests/ -v
+# Run backend tests (requires Docker — deps not installed locally)
+docker run --rm --user root \
+  -v "C:/Projects/forex-ai-platform/backend:/app" \
+  -e DATABASE_URL=postgresql://dummy:dummy@localhost/dummy \
+  -e REDIS_URL=redis://localhost:6379/0 \
+  -e JWT_SECRET=test -e CLAUDE_API_KEY=test -e VOYAGE_API_KEY=test \
+  -e OANDA_API_KEY=test -e OANDA_ACCOUNT_ID=test -e OPERATOR_PASSWORD=test \
+  -e NUMBA_CACHE_DIR=/tmp/numba_cache -e PYTHONDONTWRITEBYTECODE=1 \
+  forex-ai-test python -m pytest tests/ -v -p no:cacheprovider
+# Build test image first if needed: docker build -t forex-ai-test ./backend
 
 # Regenerate golden fixture (only after intentional engine changes)
 cd backend && python tests/fixtures/generate_golden.py
@@ -332,11 +342,41 @@ DRY_RUN=1 doppler run -- python backend/scripts/backfill.py
 
 ---
 
+## Code Quality Pass (2026-04-10)
+
+Addressed six issues identified in a codebase review. All 80 tests pass.
+
+| Fix | Files changed |
+|---|---|
+| **JPY pip size** — `fixed_pips` stops used `pip_size=0.0001` for all pairs; JPY pairs need `0.01` (100× difference caused immediate stop-outs on USDJPY/GBPJPY) | `engine/parser.py`, `engine/runner.py` |
+| **Per-pair spread fees** — flat `7e-5` fee replaced with per-pair lookup (`_PAIR_FEES` dict); GBPJPY now correctly uses `1.7e-4` vs EURUSD's `6.5e-5` | `engine/runner.py` |
+| **RAG score threshold** — chunks appearing in only one retrieval path (score ≤ 0.016) are now filtered out (`_MIN_RRF_SCORE=0.020`); reduces irrelevant context injected into Claude | `ai/retrieval.py` |
+| **RAG chunk size cap** — each chunk truncated to 600 chars before injection (`_MAX_CHUNK_CHARS`) to bound worst-case API cost | `routers/copilot.py` |
+| **ClickHouse removed** — service was writing data but never reading it; removed service, volume, env vars, `clickhouse.py`, `clickhouse-connect` dep, Celery startup hook | `docker-compose.yml`, `core/config.py`, `core/celery_app.py`, `tasks/backtest.py`, `requirements.txt` |
+| **SQL equity curve** — Python loop replaced with `SUM/MAX OVER` window function CTE; computation now happens in TimescaleDB | `routers/analytics.py` |
+
+Golden fixture regenerated to reflect updated EURUSD fee (`7e-5` → `6.5e-5`): Sharpe −7.5997, PnL −$327.91.
+
+Test count: **80 passed** (up from 58 at Phase 1 gate).
+
+---
+
+## Post-Phase-3 Bug Fixes (2026-04-10)
+
+| PR | Fix |
+|---|---|
+| #26 | Cast NUMERIC→float in `GET /api/backtest/results` (list endpoint) |
+| #27 | Add `Authorization` header to Co-Pilot chat and strategy save fetches |
+| #28 | Add auth guard + 401 redirect on Co-Pilot page |
+| #29 | Fix `IndeterminateDatatypeError` in RAG retrieval — split shared params per query |
+| #30 | Add USDCHF as sixth trading pair (backfill script + frontend) |
+| #31 | Rotate Anthropic API key (GitHub secret updated) |
+| #32 | Cast NUMERIC→float in `GET /api/backtest/results/{id}` (detail endpoint) — pending merge |
+
 ## Open Items (non-blocking)
 
 | Item | Priority | Notes |
 |---|---|---|
-| Anthropic credits | Medium | AI auto-summary implemented but returns 400 credit error. Top up at console.anthropic.com → Plans & Billing |
-| EURGBP 1H backfill | Low | In progress on staging. Re-run if interrupted: see backfill commands above |
-| GBPJPY 1m + 1H backfill | Low | Start after EURGBP 1H completes |
-| Frontend backtest page | Medium | Current `/backtest` is a placeholder stub — backtest must be submitted via API directly. Full form was built but replaced; needs reinstatement in Phase 4 sprint |
+| PR #32 merge | High | Fixes "Application error" on backtest result detail page — awaiting CI green |
+| USDCHF backfill | Low | Triggered 2026-04-10; ~10–15 min. Re-run if needed: `docker exec forex-ai-platform-backend-1 bash -c 'BACKFILL_PAIRS=USDCHF python backend/scripts/backfill.py'` |
+| Co-Pilot end-to-end test | Medium | New Anthropic key deployed via PR #31. Verify chat works end-to-end on staging |

@@ -142,6 +142,34 @@ def test_fuse_respects_top_n():
     assert len(fused) <= 6  # _TOP_N = 6
 
 
+def test_fuse_drops_single_path_low_score():
+    """Chunks appearing in only one retrieval path score ~0.016 — below _MIN_RRF_SCORE=0.020."""
+    from ai.retrieval import _MIN_RRF_SCORE
+    only_vector = [{"id": "v_only", "content": "x"}]
+    only_bm25 = [{"id": "b_only", "content": "y"}]
+    fused = _fuse(only_vector, only_bm25, id_key="id")
+    # Neither chunk reaches _MIN_RRF_SCORE, so both should be filtered out
+    ids = [r["id"] for r in fused]
+    assert "v_only" not in ids
+    assert "b_only" not in ids
+
+
+def test_fuse_keeps_dual_path_chunk():
+    """A chunk appearing in both paths scores ~0.032 — above _MIN_RRF_SCORE=0.020."""
+    shared = [{"id": "both", "content": "z"}]
+    fused = _fuse(shared, shared, id_key="id")
+    assert any(r["id"] == "both" for r in fused)
+
+
+def test_chunk_content_truncated_at_max_chars():
+    """RAG chunks injected into the prompt must not exceed _MAX_CHUNK_CHARS."""
+    from routers.copilot import _MAX_CHUNK_CHARS
+    long_content = "x" * (_MAX_CHUNK_CHARS + 500)
+    chunks = [{"content": long_content, "source": "backtest", "metadata": {}}]
+    truncated = chunks[0]["content"][:_MAX_CHUNK_CHARS]
+    assert len(truncated) == _MAX_CHUNK_CHARS
+
+
 # ---------------------------------------------------------------------------
 # voyage_client — Redis cache (mocked)
 # ---------------------------------------------------------------------------

@@ -39,9 +39,18 @@ logger = logging.getLogger(__name__)
 
 _VBT_VERSION = "0.26.2"
 
-# Typical Forex spread modelled as a flat fee per trade (fraction of trade value).
-# 0.7 pips on EURUSD ≈ 0.00007 per unit ≈ 7e-5 as a fraction of ~1.08
-_DEFAULT_FEES = 7e-5
+# Spread modelled as a flat round-trip fee per trade (fraction of trade value).
+# Derived from: typical_spread_pips * pip_size / typical_price
+# JPY pairs use pip_size=0.01; all others use pip_size=0.0001.
+_PAIR_FEES: dict[str, float] = {
+    "EURUSD": 6.5e-5,   # ~0.7 pip  / 1.08
+    "GBPUSD": 7.8e-5,   # ~1.0 pip  / 1.28
+    "EURGBP": 1.4e-4,   # ~1.2 pip  / 0.86
+    "USDCHF": 9.2e-5,   # ~1.0 pip  / 0.91 (pip=0.0001, price~0.91)
+    "USDJPY": 6.9e-5,   # ~1.0 pip  / 145  (pip=0.01)
+    "GBPJPY": 1.7e-4,   # ~2.5 pips / 185  (pip=0.01)
+}
+_DEFAULT_FEES = 1.0e-4  # conservative fallback for any unlisted pair
 
 # Timeframe string → pandas/vectorbt frequency string for Sharpe annualisation
 _TIMEFRAME_FREQ: dict[str, str] = {
@@ -102,7 +111,7 @@ def run_backtest(
     _progress(5)
 
     # --- Parse SIR into signal arrays ---
-    parser = SIRParser(sir, df)
+    parser = SIRParser(sir, df, symbol=pair)
     raw_entries = parser.entry_signals()          # bar N signals
     sl_fracs = parser.sl_fractions()              # based on bar N data
     tp_fracs = parser.tp_fractions()              # based on bar N data
@@ -125,6 +134,7 @@ def run_backtest(
 
     # --- Build vectorbt portfolio ---
     freq = _TIMEFRAME_FREQ.get(timeframe, "1h")
+    fees = _PAIR_FEES.get(pair.upper(), _DEFAULT_FEES)
 
     logger.info(
         "Running vectorbt backtest: %s bars, %d entry signals",
@@ -145,7 +155,7 @@ def run_backtest(
             size_type="amount",      # sizes are in units of the base currency
             sl_stop=sl_fracs,        # fraction of entry price
             tp_stop=tp_fracs,        # fraction of entry price
-            fees=_DEFAULT_FEES,
+            fees=fees,
             init_cash=initial_capital,
             freq=freq,
             upon_opposite_entry="ignore",  # no reversals in Phase 1 (long-only)

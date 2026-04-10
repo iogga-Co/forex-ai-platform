@@ -44,9 +44,10 @@ class SIRParser:
           Columns required: open, high, low, close, volume
     """
 
-    def __init__(self, sir: StrategyIR, df: pd.DataFrame) -> None:
+    def __init__(self, sir: StrategyIR, df: pd.DataFrame, symbol: str = "") -> None:
         self._sir = sir
         self._df = df
+        self._symbol = symbol.upper()
         self._indicator_cache: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
@@ -245,7 +246,7 @@ class SIRParser:
         Convert a StopConfig to a per-bar fraction of close price.
         For ATR stops: fraction = ATR * multiplier / close
         For percent:   fraction = percent value directly
-        For pips:      fraction = pips * pip_size / close  (hardcoded pip_size=0.0001)
+        For pips:      fraction = pips * pip_size / close  (0.01 for JPY pairs, else 0.0001)
         """
         if stop_cfg.type == "atr":
             atr_vals = self._get_indicator("ATR", period=stop_cfg.period or 14)
@@ -262,7 +263,7 @@ class SIRParser:
             )
 
         if stop_cfg.type == "fixed_pips":
-            pip_size = 0.0001  # standard for most Forex pairs
+            pip_size = 0.01 if "JPY" in self._symbol else 0.0001
             pips = stop_cfg.pips or 20.0
             frac = (pips * pip_size) / self._df["close"].replace(0, np.nan)
             return frac.fillna(0.01)

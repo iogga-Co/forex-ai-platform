@@ -5,6 +5,7 @@ Tests do NOT require a running database or Redis.
 """
 
 import pytest
+import pandas as pd
 
 from pydantic import ValidationError
 
@@ -209,3 +210,82 @@ class TestSIRParser:
         sizes = parser.position_sizes(account_equity=100_000.0)
         assert (sizes <= sir.position_sizing.max_size_units).all()
         assert (sizes >= 1.0).all()
+
+    def test_fixed_pips_jpy_pip_size(self, sample_ohlcv):
+        """JPY pairs must use pip_size=0.01; non-JPY pairs must use 0.0001."""
+        import numpy as np
+        from datetime import datetime, timedelta, timezone
+
+        pips_sir_dict = {
+            "entry_conditions": [
+                {"indicator": "RSI", "period": 14, "operator": ">", "value": 50},
+            ],
+            "exit_conditions": {
+                "stop_loss":   {"type": "fixed_pips", "pips": 20},
+                "take_profit": {"type": "fixed_pips", "pips": 40},
+            },
+            "position_sizing": {"risk_per_trade_pct": 1.0, "max_size_units": 10000},
+        }
+        sir = StrategyIR.model_validate(pips_sir_dict)
+
+        def _make_df(n: int, price: float) -> pd.DataFrame:
+            rng = np.random.default_rng(42)
+            start = datetime(2022, 1, 3, tzinfo=timezone.utc)
+            idx = pd.DatetimeIndex([start + timedelta(hours=i) for i in range(n)], tz=timezone.utc)
+            closes = np.cumprod(1 + rng.normal(0, 0.0005, n)) * price
+            opens = np.roll(closes, 1); opens[0] = price
+            spread = rng.uniform(0.0002, 0.001, n)
+            return pd.DataFrame({
+                "open": opens, "high": np.maximum(opens, closes) + spread,
+                "low": np.maximum(np.minimum(opens, closes) - spread, 1e-4),
+                "close": closes, "volume": 1000.0,
+            }, index=idx).astype("float64")
+
+        # EURUSD: prices ~1.08, pip_size=0.0001 → fraction ≈ 20*0.0001/1.08 ≈ 0.00185
+        eurusd_df = _make_df(100, 1.0800)
+        sl_eurusd = SIRParser(sir, eurusd_df, symbol="EURUSD").sl_fractions().median()
+
+        # USDJPY: prices ~145, pip_size=0.01 → fraction ≈ 20*0.01/145 ≈ 0.00138
+        usdjpy_df = _make_df(100, 145.00)
+        sl_usdjpy = SIRParser(sir, usdjpy_df, symbol="USDJPY").sl_fractions().median()
+
+        # Without the fix both would be ~equal (100x error on JPY).
+        # With the fix, the fractions should be in the same ballpark (within 5x).
+        assert sl_eurusd > 0
+        assert sl_usdjpy > 0
+        ratio = sl_eurusd / sl_usdjpy
+        assert 0.5 < ratio < 5.0, f"Pip size mismatch: EURUSD/USDJPY SL ratio={ratio:.2f}"
+
+
+# ---------------------------------------------------------------------------
+# Runner — per-pair fee lookup
+# ---------------------------------------------------------------------------
+
+class TestPairFees:
+    def test_known_pairs_have_individual_fees(self):
+        from engine.runner import _PAIR_FEES, _DEFAULT_FEES
+        known = ["EURUSD", "GBPUSD", "EURGBP", "USDCHF", "USDJPY", "GBPJPY"]
+        for pair in known:
+            assert pair in _PAIR_FEES, f"{pair} missing from _PAIR_FEES"
+            assert _PAIR_FEES[pair] != _DEFAULT_FEES, (
+                f"{pair} fee equals _DEFAULT_FEES — probably not intentional"
+            )
+
+    def test_jpy_pairs_cheaper_than_default(self):
+        """JPY fee fractions are small because pip_size/price is tiny."""
+        from engine.runner import _PAIR_FEES
+        # Both JPY pairs should have fees well below 1e-3
+        assert _PAIR_FEES["USDJPY"] < 1e-3
+        assert _PAIR_FEES["GBPJPY"] < 1e-3
+
+    def test_unlisted_pair_falls_back_to_default(self):
+        from engine.runner import _PAIR_FEES, _DEFAULT_FEES
+        assert "AUDUSD" not in _PAIR_FEES  # not in our trading universe yet
+        # Simulate the lookup used in run_backtest
+        fee = _PAIR_FEES.get("AUDUSD", _DEFAULT_FEES)
+        assert fee == _DEFAULT_FEES
+
+    def test_gbpjpy_more_expensive_than_eurusd(self):
+        """GBPJPY has a wider spread than EURUSD — its fee fraction must be larger."""
+        from engine.runner import _PAIR_FEES
+        assert _PAIR_FEES["GBPJPY"] > _PAIR_FEES["EURUSD"]
