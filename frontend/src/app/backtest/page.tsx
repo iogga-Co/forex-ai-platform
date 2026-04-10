@@ -151,7 +151,7 @@ export default function BacktestPage() {
   }
 
   const stratName = (s: Strategy) =>
-    s.ir_json?.metadata?.name ?? s.ir_json?.metadata?.description?.slice(0, 40) ?? s.id.slice(0, 8);
+    s.description || s.ir_json?.metadata?.description?.slice(0, 40) || s.id.slice(0, 8);
 
   if (notLoggedIn) {
     return (
