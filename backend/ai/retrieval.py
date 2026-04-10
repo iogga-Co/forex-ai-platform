@@ -24,6 +24,11 @@ _BM25_K = 5
 _TOP_N = 6
 # RRF smoothing constant
 _RRF_K = 60
+# Minimum RRF score to include a chunk.
+# With _RRF_K=60, a chunk appearing in only one list at any rank scores at most
+# 1/(60+1) ≈ 0.0164.  A threshold of 0.020 requires agreement from both
+# semantic and keyword retrieval, discarding single-path low-confidence hits.
+_MIN_RRF_SCORE = 0.020
 
 
 def _rrf_score(rank: int) -> float:
@@ -50,7 +55,7 @@ def _fuse(
         by_id[rid] = row
 
     ranked = sorted(scores.keys(), key=lambda k: scores[k], reverse=True)
-    return [by_id[rid] for rid in ranked[:_TOP_N]]
+    return [by_id[rid] for rid in ranked[:_TOP_N] if scores[rid] >= _MIN_RRF_SCORE]
 
 
 async def retrieve_context(

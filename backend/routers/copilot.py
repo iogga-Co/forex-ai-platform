@@ -33,6 +33,10 @@ from core.db import get_pool
 
 logger = logging.getLogger(__name__)
 
+# Hard cap on characters per RAG chunk injected into the prompt.
+# Prevents a single long summary_text from dominating the context window.
+_MAX_CHUNK_CHARS = 600
+
 router = APIRouter(prefix="/api/copilot", tags=["Co-Pilot"])
 
 
@@ -154,7 +158,9 @@ async def chat(
             messages: list[MessageParam] = []
 
             if context_chunks:
-                context_text = "\n\n".join(c["content"] for c in context_chunks)
+                context_text = "\n\n".join(
+                    c["content"][:_MAX_CHUNK_CHARS] for c in context_chunks
+                )
                 messages.append({
                     "role": "user",
                     "content": (

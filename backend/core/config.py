@@ -4,7 +4,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # Database
     database_url: str
-    clickhouse_url: str
 
     # Redis / Celery
     redis_url: str

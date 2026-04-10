@@ -1,7 +1,6 @@
 import logging
 
 from celery import Celery
-from celery.signals import worker_ready
 
 from core.config import settings
 
@@ -27,11 +26,3 @@ celery_app.conf.update(
 )
 
 
-@worker_ready.connect
-def on_worker_ready(**_kwargs: object) -> None:
-    """Ensure ClickHouse schema exists when the worker starts."""
-    try:
-        from core.clickhouse import init_schema
-        init_schema()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("ClickHouse init_schema failed (non-fatal): %s", exc)

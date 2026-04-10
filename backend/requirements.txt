@@ -38,9 +38,6 @@ yfinance==0.2.51
 anthropic==0.49.0
 voyageai==0.2.4
 
-# Phase 3 — Analytics Suite
-clickhouse-connect==0.8.14
-
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0

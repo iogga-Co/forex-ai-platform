@@ -132,22 +132,6 @@ def run_backtest_task(
             run_id = data_db.insert_backtest_run(conn, run_record)
             data_db.bulk_insert_trades(conn, run_id, result.trades)
 
-        # Write to ClickHouse for analytics queries (best-effort — never fails the job)
-        try:
-            from core.clickhouse import write_backtest_run as ch_write
-            ch_write(
-                run_id=run_id,
-                strategy_id=strategy_id,
-                pair=pair,
-                timeframe=timeframe,
-                period_start=period_start,
-                period_end=period_end,
-                metrics=result.metrics,
-                trades=result.trades,
-            )
-        except Exception as exc:
-            logger.warning("ClickHouse write failed (non-fatal): %s", exc)
-
         # Auto-summarise with Claude and store embedding (best-effort — never fails the job)
         try:
             progress(92, "Generating AI summary")

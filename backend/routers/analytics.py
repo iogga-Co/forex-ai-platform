@@ -47,38 +47,51 @@ async def equity_curve(
         if not exists:
             raise HTTPException(status_code=404, detail="Backtest result not found")
 
-        trades = await conn.fetch(
+        rows = await conn.fetch(
             """
-            SELECT entry_time, exit_time, pnl
-            FROM trades
-            WHERE backtest_run_id = $1
-            ORDER BY entry_time ASC
+            WITH cumulative AS (
+                SELECT
+                    entry_time,
+                    SUM(pnl) OVER (
+                        ORDER BY entry_time
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    ) AS cumulative_pnl
+                FROM trades
+                WHERE backtest_run_id = $1
+            )
+            SELECT
+                entry_time,
+                cumulative_pnl,
+                MAX(cumulative_pnl) OVER (
+                    ORDER BY entry_time
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS running_peak_pnl
+            FROM cumulative
+            ORDER BY entry_time
             """,
             run_id,
         )
 
     initial_capital = 100_000.0
-    cumulative = 0.0
-    peak = initial_capital
     points = []
 
-    for t in trades:
-        cumulative += float(t["pnl"])
-        equity = initial_capital + cumulative
-        if equity > peak:
-            peak = equity
+    for r in rows:
+        cum_pnl = float(r["cumulative_pnl"])
+        equity = initial_capital + cum_pnl
+        peak = initial_capital + float(r["running_peak_pnl"])
         drawdown = (equity - peak) / peak if peak > 0 else 0.0
         points.append({
-            "time": t["entry_time"].isoformat(),
+            "time": r["entry_time"].isoformat(),
             "equity": round(equity, 2),
-            "cumulative_pnl": round(cumulative, 2),
+            "cumulative_pnl": round(cum_pnl, 2),
             "drawdown": round(drawdown, 4),
         })
 
+    final_cumulative = float(rows[-1]["cumulative_pnl"]) if rows else 0.0
     return {
         "run_id": str(run_id),
         "initial_capital": initial_capital,
-        "final_equity": round(initial_capital + cumulative, 2),
+        "final_equity": round(initial_capital + final_cumulative, 2),
         "max_drawdown": round(min((p["drawdown"] for p in points), default=0.0), 4),
         "points": points,
     }
