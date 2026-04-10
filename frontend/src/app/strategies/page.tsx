@@ -79,7 +79,10 @@ export default function StrategiesPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/strategies`)
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    fetch(`${API_BASE}/api/strategies`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<Strategy[]>;
