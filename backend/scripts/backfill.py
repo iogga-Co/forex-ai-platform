@@ -41,7 +41,7 @@ from data import db as data_db  # noqa: E402
 from data import dukascopy  # noqa: E402
 from data.quality import detect_gaps, filter_outliers  # noqa: E402
 
-_DEFAULT_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY"]
+_DEFAULT_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"]
 _DEFAULT_TIMEFRAMES = ["1m", "1H"]
 
 
