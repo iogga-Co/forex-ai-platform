@@ -144,7 +144,6 @@ def test_fuse_respects_top_n():
 
 def test_fuse_drops_single_path_low_score():
     """Chunks appearing in only one retrieval path score ~0.016 — below _MIN_RRF_SCORE=0.020."""
-    from ai.retrieval import _MIN_RRF_SCORE
     only_vector = [{"id": "v_only", "content": "x"}]
     only_bm25 = [{"id": "b_only", "content": "y"}]
     fused = _fuse(only_vector, only_bm25, id_key="id")

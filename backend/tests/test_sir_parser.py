@@ -233,7 +233,8 @@ class TestSIRParser:
             start = datetime(2022, 1, 3, tzinfo=timezone.utc)
             idx = pd.DatetimeIndex([start + timedelta(hours=i) for i in range(n)], tz=timezone.utc)
             closes = np.cumprod(1 + rng.normal(0, 0.0005, n)) * price
-            opens = np.roll(closes, 1); opens[0] = price
+            opens = np.roll(closes, 1)
+            opens[0] = price
             spread = rng.uniform(0.0002, 0.001, n)
             return pd.DataFrame({
                 "open": opens, "high": np.maximum(opens, closes) + spread,
