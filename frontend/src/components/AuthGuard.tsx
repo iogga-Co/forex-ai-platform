@@ -1,29 +1,33 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 /**
  * Wraps all pages except /login.
- * On first render it renders nothing (blank) while it checks localStorage.
- * If no token is found it redirects to /login before anything is painted.
+ * The auth check runs synchronously inside the useState initializer —
+ * before the first render — so the browser never paints protected content
+ * for unauthenticated users. window.location.replace navigates immediately
+ * without adding a history entry.
  */
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const [ready, setReady] = useState(false);
 
-  useEffect(() => {
-    if (pathname === "/login") {
-      setReady(true);
-      return;
-    }
+  const [ready] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false; // SSR: wait for client
+    if (window.location.pathname === "/login") return true;
     if (!localStorage.getItem("access_token")) {
-      router.replace("/login");
-    } else {
-      setReady(true);
+      window.location.replace("/login");
+      return false;
     }
-  }, [pathname, router]);
+    return true;
+  });
+
+  // Re-check on in-app navigation (the initializer only runs once on mount).
+  if (pathname !== "/login" && typeof window !== "undefined" && !localStorage.getItem("access_token")) {
+    window.location.replace("/login");
+    return null;
+  }
 
   if (!ready) return null;
   return <>{children}</>;
