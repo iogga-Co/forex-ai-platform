@@ -73,33 +73,41 @@ async def retrieve_context(
     # ------------------------------------------------------------------
     # 1. conversation_turns — past messages (excluding current session)
     # ------------------------------------------------------------------
-    session_filter = "AND session_id != $3::uuid" if session_id else ""
-    session_params: list[Any] = [embedding_str, query_text]
+    # Each query gets only the parameters it references — passing unused
+    # parameters causes asyncpg to raise IndeterminateDatatypeError.
     if session_id:
-        session_params.append(session_id)
+        vec_filter = "AND session_id != $2::uuid"
+        vec_params: list[Any] = [embedding_str, session_id]
+        bm25_filter = "AND session_id != $2::uuid"
+        bm25_params: list[Any] = [query_text, session_id]
+    else:
+        vec_filter = ""
+        vec_params = [embedding_str]
+        bm25_filter = ""
+        bm25_params = [query_text]
 
     vector_turns = await conn.fetch(
         f"""
         SELECT id, session_id, role, content, strategy_id, created_at
         FROM conversation_turns
         WHERE embedding IS NOT NULL
-        {session_filter}
+        {vec_filter}
         ORDER BY embedding <=> $1::vector
         LIMIT {_VECTOR_K}
         """,
-        *session_params,
+        *vec_params,
     )
 
     bm25_turns = await conn.fetch(
         f"""
         SELECT id, session_id, role, content, strategy_id, created_at
         FROM conversation_turns
-        WHERE content_tsv @@ plainto_tsquery('english', $2)
-        {session_filter}
-        ORDER BY ts_rank(content_tsv, plainto_tsquery('english', $2)) DESC
+        WHERE content_tsv @@ plainto_tsquery('english', $1)
+        {bm25_filter}
+        ORDER BY ts_rank(content_tsv, plainto_tsquery('english', $1)) DESC
         LIMIT {_BM25_K}
         """,
-        *session_params,
+        *bm25_params,
     )
 
     fused_turns = _fuse(
