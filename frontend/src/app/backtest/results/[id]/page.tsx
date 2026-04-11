@@ -167,7 +167,11 @@ export default function BacktestResultPage() {
       fetchWithAuth(`/api/analytics/backtest/${id}/candles`)
         .then((r) => r.ok ? r.json() : { candles: [] }),
       fetchWithAuth(`/api/analytics/backtest/${id}/indicators`)
-        .then((r) => r.ok ? r.json() : { indicators: [] }),
+        .then((r) => {
+          if (!r.ok) { console.warn("[indicators] HTTP", r.status); return { indicators: [] }; }
+          return r.json();
+        })
+        .then((d) => { console.log("[indicators] response:", JSON.stringify(d).slice(0, 300)); return d; }),
     ])
       .then(([res, eq, candleData, indData]) => {
         setResult(res);

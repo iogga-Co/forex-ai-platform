@@ -295,6 +295,12 @@ async def get_backtest_indicators(
     # Collect unique indicator specs from entry_conditions
     entry_conditions = ir.get("entry_conditions", []) or []
     exit_conditions = ir.get("exit_conditions", {}) or {}
+    logger.info(
+        "indicators [%s]: %d entry_conditions, keys=%s",
+        run_id,
+        len(entry_conditions),
+        [c.get("indicator") for c in entry_conditions],
+    )
 
     specs: dict[str, dict] = {}
 
@@ -337,6 +343,7 @@ async def get_backtest_indicators(
             p = int(ec.get("period") or 14)
             specs.setdefault(f"ATR_{p}", {"type": "ATR", "period": p})
 
+    logger.info("indicators [%s]: specs resolved = %s", run_id, list(specs.keys()))
     if not specs:
         return {"indicators": []}
 
@@ -377,84 +384,88 @@ async def get_backtest_indicators(
 
     for key, spec in specs.items():
         t = spec["type"]
+        try:
+            if t == "EMA":
+                s = calc_ema(df["close"], spec["period"])
+                result_indicators.append({
+                    "id": key, "type": "EMA", "pane": "overlay",
+                    "series": [{"name": f"EMA {spec['period']}", "color": COLORS["EMA"], "data": to_points(s)}],
+                })
 
-        if t == "EMA":
-            s = calc_ema(df["close"], spec["period"])
-            result_indicators.append({
-                "id": key, "type": "EMA", "pane": "overlay",
-                "series": [{"name": f"EMA {spec['period']}", "color": COLORS["EMA"], "data": to_points(s)}],
-            })
+            elif t == "SMA":
+                s = calc_sma(df["close"], spec["period"])
+                result_indicators.append({
+                    "id": key, "type": "SMA", "pane": "overlay",
+                    "series": [{"name": f"SMA {spec['period']}", "color": COLORS["SMA"], "data": to_points(s)}],
+                })
 
-        elif t == "SMA":
-            s = calc_sma(df["close"], spec["period"])
-            result_indicators.append({
-                "id": key, "type": "SMA", "pane": "overlay",
-                "series": [{"name": f"SMA {spec['period']}", "color": COLORS["SMA"], "data": to_points(s)}],
-            })
+            elif t == "BB":
+                upper, middle, lower = calc_bb(df["close"], spec["period"], spec["std_dev"])
+                result_indicators.append({
+                    "id": key, "type": "BB", "pane": "overlay",
+                    "series": [
+                        {"name": "BB Upper", "color": COLORS["BB_band"], "data": to_points(upper)},
+                        {"name": "BB Middle", "color": COLORS["BB_mid"], "data": to_points(middle)},
+                        {"name": "BB Lower", "color": COLORS["BB_band"], "data": to_points(lower)},
+                    ],
+                })
 
-        elif t == "BB":
-            upper, middle, lower = calc_bb(df["close"], spec["period"], spec["std_dev"])
-            result_indicators.append({
-                "id": key, "type": "BB", "pane": "overlay",
-                "series": [
-                    {"name": "BB Upper", "color": COLORS["BB_band"], "data": to_points(upper)},
-                    {"name": "BB Middle", "color": COLORS["BB_mid"], "data": to_points(middle)},
-                    {"name": "BB Lower", "color": COLORS["BB_band"], "data": to_points(lower)},
-                ],
-            })
+            elif t == "RSI":
+                s = calc_rsi(df["close"], spec["period"])
+                result_indicators.append({
+                    "id": key, "type": "RSI", "pane": "oscillator",
+                    "levels": [
+                        {"value": 70, "color": "#6b7280"},
+                        {"value": 50, "color": "#374151"},
+                        {"value": 30, "color": "#6b7280"},
+                    ],
+                    "series": [{"name": f"RSI {spec['period']}", "color": COLORS["RSI"], "data": to_points(s)}],
+                })
 
-        elif t == "RSI":
-            s = calc_rsi(df["close"], spec["period"])
-            result_indicators.append({
-                "id": key, "type": "RSI", "pane": "oscillator",
-                "levels": [
-                    {"value": 70, "color": "#6b7280"},
-                    {"value": 50, "color": "#374151"},
-                    {"value": 30, "color": "#6b7280"},
-                ],
-                "series": [{"name": f"RSI {spec['period']}", "color": COLORS["RSI"], "data": to_points(s)}],
-            })
+            elif t == "MACD":
+                macd_line, signal_line, _ = calc_macd(df["close"], spec["fast"], spec["slow"], spec["signal_period"])
+                result_indicators.append({
+                    "id": key, "type": "MACD", "pane": "oscillator",
+                    "levels": [{"value": 0, "color": "#374151"}],
+                    "series": [
+                        {"name": "MACD", "color": COLORS["MACD_line"], "data": to_points(macd_line)},
+                        {"name": "Signal", "color": COLORS["MACD_signal"], "data": to_points(signal_line)},
+                    ],
+                })
 
-        elif t == "MACD":
-            macd_line, signal_line, _ = calc_macd(df["close"], spec["fast"], spec["slow"], spec["signal_period"])
-            result_indicators.append({
-                "id": key, "type": "MACD", "pane": "oscillator",
-                "levels": [{"value": 0, "color": "#374151"}],
-                "series": [
-                    {"name": "MACD", "color": COLORS["MACD_line"], "data": to_points(macd_line)},
-                    {"name": "Signal", "color": COLORS["MACD_signal"], "data": to_points(signal_line)},
-                ],
-            })
+            elif t == "ATR":
+                s = calc_atr(df["high"], df["low"], df["close"], spec["period"])
+                result_indicators.append({
+                    "id": key, "type": "ATR", "pane": "oscillator",
+                    "series": [{"name": f"ATR {spec['period']}", "color": COLORS["ATR"], "data": to_points(s)}],
+                })
 
-        elif t == "ATR":
-            s = calc_atr(df["high"], df["low"], df["close"], spec["period"])
-            result_indicators.append({
-                "id": key, "type": "ATR", "pane": "oscillator",
-                "series": [{"name": f"ATR {spec['period']}", "color": COLORS["ATR"], "data": to_points(s)}],
-            })
+            elif t == "ADX":
+                s = calc_adx(df["high"], df["low"], df["close"], spec["period"])
+                result_indicators.append({
+                    "id": key, "type": "ADX", "pane": "oscillator",
+                    "levels": [{"value": 25, "color": "#6b7280"}],
+                    "series": [{"name": f"ADX {spec['period']}", "color": COLORS["ADX"], "data": to_points(s)}],
+                })
 
-        elif t == "ADX":
-            s = calc_adx(df["high"], df["low"], df["close"], spec["period"])
-            result_indicators.append({
-                "id": key, "type": "ADX", "pane": "oscillator",
-                "levels": [{"value": 25, "color": "#6b7280"}],
-                "series": [{"name": f"ADX {spec['period']}", "color": COLORS["ADX"], "data": to_points(s)}],
-            })
+            elif t == "STOCH":
+                k, d = calc_stoch(df["high"], df["low"], df["close"], spec["period"], spec["k_smooth"], spec["d_period"])
+                result_indicators.append({
+                    "id": key, "type": "STOCH", "pane": "oscillator",
+                    "levels": [
+                        {"value": 80, "color": "#6b7280"},
+                        {"value": 20, "color": "#6b7280"},
+                    ],
+                    "series": [
+                        {"name": "%K", "color": COLORS["STOCH_k"], "data": to_points(k)},
+                        {"name": "%D", "color": COLORS["STOCH_d"], "data": to_points(d)},
+                    ],
+                })
 
-        elif t == "STOCH":
-            k, d = calc_stoch(df["high"], df["low"], df["close"], spec["period"], spec["k_smooth"], spec["d_period"])
-            result_indicators.append({
-                "id": key, "type": "STOCH", "pane": "oscillator",
-                "levels": [
-                    {"value": 80, "color": "#6b7280"},
-                    {"value": 20, "color": "#6b7280"},
-                ],
-                "series": [
-                    {"name": "%K", "color": COLORS["STOCH_k"], "data": to_points(k)},
-                    {"name": "%D", "color": COLORS["STOCH_d"], "data": to_points(d)},
-                ],
-            })
+        except Exception as exc:
+            logger.error("indicators [%s]: failed to compute %s: %s", run_id, key, exc, exc_info=True)
 
+    logger.info("indicators [%s]: returning %d groups", run_id, len(result_indicators))
     return {"indicators": result_indicators}
 
 
