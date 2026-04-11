@@ -137,7 +137,7 @@ async def retrieve_context(
     # ------------------------------------------------------------------
     vector_strategies = await conn.fetch(
         f"""
-        SELECT id, version, description, pair, timeframe, ir_json
+        SELECT id, version, description, pair, timeframe, ir_json, deleted_at
         FROM strategies
         WHERE embedding IS NOT NULL
         ORDER BY embedding <=> $1::vector
@@ -148,7 +148,7 @@ async def retrieve_context(
 
     bm25_strategies = await conn.fetch(
         f"""
-        SELECT id, version, description, pair, timeframe, ir_json
+        SELECT id, version, description, pair, timeframe, ir_json, deleted_at
         FROM strategies
         WHERE to_tsvector('english', description) @@ plainto_tsquery('english', $1)
         ORDER BY ts_rank(to_tsvector('english', description), plainto_tsquery('english', $1)) DESC
@@ -163,10 +163,11 @@ async def retrieve_context(
         id_key="id",
     )
     for row in fused_strategies:
+        label = "STRATEGY DELETED BY USER" if row["deleted_at"] else f"STRATEGY v{row['version']}"
         context.append({
             "source": "strategy",
             "content": (
-                f"[STRATEGY v{row['version']}] {row['pair']} {row['timeframe']}: "
+                f"[{label}] {row['pair']} {row['timeframe']}: "
                 f"{row['description']}"
             ),
             "metadata": {

@@ -113,6 +113,7 @@ async def list_strategies(
             """
             SELECT id, version, description, pair, timeframe, ir_json
             FROM strategies
+            WHERE deleted_at IS NULL
             ORDER BY created_at DESC
             LIMIT 100
             """
@@ -135,18 +136,24 @@ async def delete_strategy(
     strategy_id: UUID,
     _: Annotated[TokenData | None, Depends(get_current_user)] = None,
 ) -> None:
-    """Delete a strategy by ID."""
+    """
+    Soft-delete a strategy.
+
+    The row and its embedding are kept so RAG retrieval can show the Co-Pilot
+    which strategies were rejected, preventing it from reproposing them.
+    The strategy is hidden from all list/get endpoints.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
-            "DELETE FROM strategies WHERE id = $1",
+            "UPDATE strategies SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
             strategy_id,
         )
 
-    if result == "DELETE 0":
+    if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Strategy not found")
 
-    logger.info("Deleted strategy %s", strategy_id)
+    logger.info("Soft-deleted strategy %s", strategy_id)
 
 
 @router.get("/{strategy_id}", response_model=StrategyResponse)
@@ -160,7 +167,7 @@ async def get_strategy(
         row = await conn.fetchrow(
             """
             SELECT id, version, description, pair, timeframe, ir_json
-            FROM strategies WHERE id = $1
+            FROM strategies WHERE id = $1 AND deleted_at IS NULL
             """,
             strategy_id,
         )
