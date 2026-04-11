@@ -281,16 +281,22 @@ async def get_backtest_indicators(
     if not candle_rows:
         return {"indicators": []}
 
-    # Build DataFrame with UTC-aware index
-    df = pd.DataFrame(
-        {
-            "open": [float(r["open"]) for r in candle_rows],
-            "high": [float(r["high"]) for r in candle_rows],
-            "low": [float(r["low"]) for r in candle_rows],
-            "close": [float(r["close"]) for r in candle_rows],
-        },
-        index=pd.DatetimeIndex([r["timestamp"] for r in candle_rows]),
-    )
+    try:
+        # Use integer Unix timestamps as the DataFrame index — avoids all
+        # tz-aware vs tz-naive comparison issues entirely.
+        ts_ints = [int(r["timestamp"].timestamp()) for r in candle_rows]
+        df = pd.DataFrame(
+            {
+                "open": [float(r["open"]) for r in candle_rows],
+                "high": [float(r["high"]) for r in candle_rows],
+                "low": [float(r["low"]) for r in candle_rows],
+                "close": [float(r["close"]) for r in candle_rows],
+            },
+            index=ts_ints,
+        )
+    except Exception as exc:
+        logger.error("indicators [%s]: failed to build DataFrame: %s", run_id, exc, exc_info=True)
+        return {"indicators": []}
 
     # Collect unique indicator specs from entry_conditions
     entry_conditions = ir.get("entry_conditions", []) or []
@@ -304,65 +310,68 @@ async def get_backtest_indicators(
 
     specs: dict[str, dict] = {}
 
-    for cond in entry_conditions:
-        ind = str(cond.get("indicator", "")).upper()
-        if ind == "EMA":
-            p = int(cond.get("period") or 14)
-            specs.setdefault(f"EMA_{p}", {"type": "EMA", "period": p})
-        elif ind == "SMA":
-            p = int(cond.get("period") or 14)
-            specs.setdefault(f"SMA_{p}", {"type": "SMA", "period": p})
-        elif ind == "RSI":
-            p = int(cond.get("period") or 14)
-            specs.setdefault(f"RSI_{p}", {"type": "RSI", "period": p})
-        elif ind == "MACD":
-            fast = int(cond.get("fast") or 12)
-            slow_ = int(cond.get("slow") or 26)
-            sig = int(cond.get("signal_period") or 9)
-            specs.setdefault(f"MACD_{fast}_{slow_}_{sig}", {"type": "MACD", "fast": fast, "slow": slow_, "signal_period": sig})
-        elif ind == "BB":
-            p = int(cond.get("period") or 20)
-            std = float(cond.get("std_dev") or 2.0)
-            specs.setdefault(f"BB_{p}_{std}", {"type": "BB", "period": p, "std_dev": std})
-        elif ind == "ATR":
-            p = int(cond.get("period") or 14)
-            specs.setdefault(f"ATR_{p}", {"type": "ATR", "period": p})
-        elif ind == "ADX":
-            p = int(cond.get("period") or 14)
-            specs.setdefault(f"ADX_{p}", {"type": "ADX", "period": p})
-        elif ind == "STOCH":
-            p = int(cond.get("period") or 14)
-            ks = int(cond.get("k_smooth") or 3)
-            dp = int(cond.get("d_period") or 3)
-            specs.setdefault(f"STOCH_{p}_{ks}_{dp}", {"type": "STOCH", "period": p, "k_smooth": ks, "d_period": dp})
+    try:
+        for cond in entry_conditions:
+            ind = str(cond.get("indicator", "")).upper()
+            if ind == "EMA":
+                p = int(cond.get("period") or 14)
+                specs.setdefault(f"EMA_{p}", {"type": "EMA", "period": p})
+            elif ind == "SMA":
+                p = int(cond.get("period") or 14)
+                specs.setdefault(f"SMA_{p}", {"type": "SMA", "period": p})
+            elif ind == "RSI":
+                p = int(cond.get("period") or 14)
+                specs.setdefault(f"RSI_{p}", {"type": "RSI", "period": p})
+            elif ind == "MACD":
+                fast = int(cond.get("fast") or 12)
+                slow_ = int(cond.get("slow") or 26)
+                sig = int(cond.get("signal_period") or 9)
+                specs.setdefault(f"MACD_{fast}_{slow_}_{sig}", {"type": "MACD", "fast": fast, "slow": slow_, "signal_period": sig})
+            elif ind == "BB":
+                p = int(cond.get("period") or 20)
+                std = float(cond.get("std_dev") or 2.0)
+                specs.setdefault(f"BB_{p}_{std}", {"type": "BB", "period": p, "std_dev": std})
+            elif ind == "ATR":
+                p = int(cond.get("period") or 14)
+                specs.setdefault(f"ATR_{p}", {"type": "ATR", "period": p})
+            elif ind == "ADX":
+                p = int(cond.get("period") or 14)
+                specs.setdefault(f"ADX_{p}", {"type": "ADX", "period": p})
+            elif ind == "STOCH":
+                p = int(cond.get("period") or 14)
+                ks = int(cond.get("k_smooth") or 3)
+                dp = int(cond.get("d_period") or 3)
+                specs.setdefault(f"STOCH_{p}_{ks}_{dp}", {"type": "STOCH", "period": p, "k_smooth": ks, "d_period": dp})
 
-    # Also pick up ATR from stop_loss / take_profit exit conditions
-    for side in ("stop_loss", "take_profit"):
-        ec = exit_conditions.get(side, {})
-        if isinstance(ec, dict) and str(ec.get("type", "")).upper() == "ATR":
-            p = int(ec.get("period") or 14)
-            specs.setdefault(f"ATR_{p}", {"type": "ATR", "period": p})
+        # Also pick up ATR from stop_loss / take_profit exit conditions
+        for side in ("stop_loss", "take_profit"):
+            ec = exit_conditions.get(side, {})
+            if isinstance(ec, dict) and str(ec.get("type", "")).upper() == "ATR":
+                p = int(ec.get("period") or 14)
+                specs.setdefault(f"ATR_{p}", {"type": "ATR", "period": p})
+    except Exception as exc:
+        logger.error("indicators [%s]: failed to parse specs: %s", run_id, exc, exc_info=True)
+        return {"indicators": []}
 
     logger.info("indicators [%s]: specs resolved = %s", run_id, list(specs.keys()))
     if not specs:
         return {"indicators": []}
 
-    # period_start is a datetime.date (DATE column) — convert to UTC-aware datetime
-    # so it can be compared safely against the UTC-aware pandas DatetimeIndex.
+    # period_start as integer Unix timestamp for comparison against integer index
     raw_ps = run["period_start"]
     if isinstance(raw_ps, datetime.datetime):
-        period_start = raw_ps if raw_ps.tzinfo else raw_ps.replace(tzinfo=datetime.timezone.utc)
+        ps_dt = raw_ps if raw_ps.tzinfo else raw_ps.replace(tzinfo=datetime.timezone.utc)
     else:
-        period_start = datetime.datetime(raw_ps.year, raw_ps.month, raw_ps.day,
-                                         tzinfo=datetime.timezone.utc)
+        ps_dt = datetime.datetime(raw_ps.year, raw_ps.month, raw_ps.day,
+                                  tzinfo=datetime.timezone.utc)
+    period_start_ts = int(ps_dt.timestamp())
 
     def to_points(series: "pd.Series") -> list[dict]:
         """Trim to period_start, drop NaN, convert to {time, value} dicts."""
-        trimmed = series[series.index >= period_start]
         out = []
-        for ts, v in trimmed.items():
-            if pd.notna(v) and np.isfinite(float(v)):
-                out.append({"time": int(ts.timestamp()), "value": round(float(v), 6)})
+        for ts, v in series.items():
+            if ts >= period_start_ts and pd.notna(v) and np.isfinite(float(v)):
+                out.append({"time": int(ts), "value": round(float(v), 6)})
         return out
 
     # Color palette
