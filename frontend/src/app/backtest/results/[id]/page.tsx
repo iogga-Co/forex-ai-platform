@@ -167,11 +167,19 @@ export default function BacktestResultPage() {
       fetchWithAuth(`/api/analytics/backtest/${id}/candles`)
         .then((r) => r.ok ? r.json() : { candles: [] }),
       fetchWithAuth(`/api/analytics/backtest/${id}/indicators`)
-        .then((r) => {
-          if (!r.ok) { console.warn("[indicators] HTTP", r.status); return { indicators: [] }; }
+        .then(async (r) => {
+          if (!r.ok) {
+            const body = await r.text().catch(() => "");
+            console.error("[indicators] HTTP", r.status, body);
+            return { indicators: [] };
+          }
           return r.json();
         })
-        .then((d) => { console.log("[indicators] response:", JSON.stringify(d).slice(0, 300)); return d; }),
+        .then((d: { indicators: unknown[]; error?: string }) => {
+          if (d.error) console.error("[indicators] backend error:", d.error);
+          console.log("[indicators] response:", JSON.stringify(d).slice(0, 500));
+          return d;
+        }),
     ])
       .then(([res, eq, candleData, indData]) => {
         setResult(res);
