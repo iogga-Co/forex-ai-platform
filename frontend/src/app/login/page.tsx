@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { setAccessToken } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,7 +28,8 @@ export default function LoginPage() {
         return;
       }
       const data = await res.json();
-      localStorage.setItem("access_token", data.access_token);
+      setAccessToken(data.access_token);
+      document.cookie = "logged_in=1; path=/; SameSite=Strict";
       router.push("/dashboard");
     } catch {
       setError("Network error — try again.");

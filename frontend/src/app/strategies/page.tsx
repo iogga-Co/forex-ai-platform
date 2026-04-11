@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,11 +26,6 @@ function entryCount(ir: Record<string, unknown>): number {
   return Array.isArray(conditions) ? conditions.length : 0;
 }
 
-function authHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
 // ---------------------------------------------------------------------------
 // Active strategy card
 // ---------------------------------------------------------------------------
@@ -47,9 +43,8 @@ function StrategyCard({
   async function handleDelete() {
     setDeleting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/strategies/${s.id}`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/strategies/${s.id}`, {
         method: "DELETE",
-        headers: authHeaders(),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       onDeleted(s.id);
@@ -146,9 +141,8 @@ function DeletedStrategyCard({
   async function handleRestore() {
     setRestoring(true);
     try {
-      const res = await fetch(`${API_BASE}/api/strategies/${s.id}/restore`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/strategies/${s.id}/restore`, {
         method: "POST",
-        headers: authHeaders(),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const restored: Strategy = await res.json();
@@ -211,14 +205,13 @@ export default function StrategiesPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const headers = authHeaders();
     setLoading(true);
     Promise.all([
-      fetch(`${API_BASE}/api/strategies`, { headers }).then((r) => {
+      fetchWithAuth(`${API_BASE}/api/strategies`).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<Strategy[]>;
       }),
-      fetch(`${API_BASE}/api/strategies/deleted`, { headers }).then((r) => {
+      fetchWithAuth(`${API_BASE}/api/strategies/deleted`).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<Strategy[]>;
       }),
