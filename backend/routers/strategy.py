@@ -113,6 +113,7 @@ async def list_strategies(
             """
             SELECT id, version, description, pair, timeframe, ir_json
             FROM strategies
+            WHERE deleted_at IS NULL
             ORDER BY created_at DESC
             LIMIT 100
             """
@@ -130,6 +131,91 @@ async def list_strategies(
     ]
 
 
+@router.delete("/{strategy_id}", status_code=204)
+async def delete_strategy(
+    strategy_id: UUID,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
+) -> None:
+    """
+    Soft-delete a strategy.
+
+    The row and its embedding are kept so RAG retrieval can show the Co-Pilot
+    which strategies were rejected, preventing it from reproposing them.
+    The strategy is hidden from all list/get endpoints.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE strategies SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+            strategy_id,
+        )
+
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    logger.info("Soft-deleted strategy %s", strategy_id)
+
+
+@router.get("/deleted", response_model=list[StrategyResponse])
+async def list_deleted_strategies(
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
+) -> list[StrategyResponse]:
+    """List all soft-deleted strategy versions, most recently deleted first."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, version, description, pair, timeframe, ir_json
+            FROM strategies
+            WHERE deleted_at IS NOT NULL
+            ORDER BY deleted_at DESC
+            LIMIT 100
+            """
+        )
+    return [
+        StrategyResponse(
+            id=r["id"],
+            version=r["version"],
+            description=r["description"],
+            pair=r["pair"],
+            timeframe=r["timeframe"],
+            ir_json=dict(r["ir_json"]),
+        )
+        for r in rows
+    ]
+
+
+@router.post("/{strategy_id}/restore", response_model=StrategyResponse)
+async def restore_strategy(
+    strategy_id: UUID,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
+) -> StrategyResponse:
+    """Restore a soft-deleted strategy, making it visible in the UI again."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE strategies SET deleted_at = NULL
+            WHERE id = $1 AND deleted_at IS NOT NULL
+            RETURNING id, version, description, pair, timeframe, ir_json
+            """,
+            strategy_id,
+        )
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Deleted strategy not found")
+
+    logger.info("Restored strategy %s", strategy_id)
+    return StrategyResponse(
+        id=row["id"],
+        version=row["version"],
+        description=row["description"],
+        pair=row["pair"],
+        timeframe=row["timeframe"],
+        ir_json=dict(row["ir_json"]),
+    )
+
+
 @router.get("/{strategy_id}", response_model=StrategyResponse)
 async def get_strategy(
     strategy_id: UUID,
@@ -141,7 +227,7 @@ async def get_strategy(
         row = await conn.fetchrow(
             """
             SELECT id, version, description, pair, timeframe, ir_json
-            FROM strategies WHERE id = $1
+            FROM strategies WHERE id = $1 AND deleted_at IS NULL
             """,
             strategy_id,
         )

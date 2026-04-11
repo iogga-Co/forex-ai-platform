@@ -69,7 +69,7 @@ export default function BacktestPage() {
   const [notLoggedIn, setNotLoggedIn] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Load strategies and history on mount
+  // Load strategies and history on mount; re-fetch strategies when tab regains focus
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (!token) {
@@ -78,19 +78,30 @@ export default function BacktestPage() {
     }
     const headers = { Authorization: `Bearer ${token}` };
 
-    fetch("/api/strategies", { headers })
-      .then((r) => r.json())
-      .then((data) => {
-        const list: Strategy[] = Array.isArray(data) ? data : data.strategies ?? [];
-        setStrategies(list);
-        if (list.length > 0) setForm((f) => ({ ...f, strategy_id: list[0].id }));
-      })
-      .catch(() => {});
+    function loadStrategies() {
+      fetch("/api/strategies", { headers })
+        .then((r) => r.json())
+        .then((data) => {
+          const list: Strategy[] = Array.isArray(data) ? data : data.strategies ?? [];
+          setStrategies(list);
+          setForm((f) => {
+            const stillExists = list.some((s) => s.id === f.strategy_id);
+            return stillExists ? f : { ...f, strategy_id: list[0]?.id ?? "" };
+          });
+        })
+        .catch(() => {});
+    }
+
+    loadStrategies();
 
     fetch("/api/backtest/results?limit=20", { headers })
       .then((r) => r.json())
       .then((data: RunSummary[]) => setHistory(Array.isArray(data) ? data : []))
       .catch(() => {});
+
+    const onVisible = () => { if (document.visibilityState === "visible") loadStrategies(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
   // Poll job status
