@@ -238,45 +238,51 @@ async def get_backtest_indicators(
             series  — list of {name, color, data: [{time, value}]}
     """
     pool = await get_pool()
-    async with pool.acquire() as conn:
-        run = await conn.fetchrow(
-            """
-            SELECT br.pair, br.period_start, br.period_end, s.ir_json
-            FROM backtest_runs br
-            JOIN strategies s ON s.id = br.strategy_id
-            WHERE br.id = $1
-            """,
-            run_id,
-        )
-        if run is None:
-            raise HTTPException(status_code=404, detail="Backtest result not found")
+    try:
+        async with pool.acquire() as conn:
+            run = await conn.fetchrow(
+                """
+                SELECT br.pair, br.period_start, br.period_end, s.ir_json
+                FROM backtest_runs br
+                JOIN strategies s ON s.id = br.strategy_id
+                WHERE br.id = $1
+                """,
+                run_id,
+            )
+            if run is None:
+                raise HTTPException(status_code=404, detail="Backtest result not found")
 
-        ir = run["ir_json"] or {}
-        if not ir:
-            return {"indicators": []}
+            ir = run["ir_json"] or {}
+            if not ir:
+                return {"indicators": []}
 
-        # Convert DATE columns to UTC-aware datetimes for the timestamptz comparison
-        def _to_dt(d: "datetime.date | datetime.datetime") -> datetime.datetime:
-            if isinstance(d, datetime.datetime):
-                return d if d.tzinfo else d.replace(tzinfo=datetime.timezone.utc)
-            return datetime.datetime(d.year, d.month, d.day, tzinfo=datetime.timezone.utc)
+            # Convert DATE columns to UTC-aware datetimes for the timestamptz comparison
+            def _to_dt(d: "datetime.date | datetime.datetime") -> datetime.datetime:
+                if isinstance(d, datetime.datetime):
+                    return d if d.tzinfo else d.replace(tzinfo=datetime.timezone.utc)
+                return datetime.datetime(d.year, d.month, d.day, tzinfo=datetime.timezone.utc)
 
-        ps_dt = _to_dt(run["period_start"])
-        pe_dt = _to_dt(run["period_end"])
+            ps_dt = _to_dt(run["period_start"])
+            pe_dt = _to_dt(run["period_end"])
 
-        candle_rows = await conn.fetch(
-            """
-            SELECT timestamp, open, high, low, close
-            FROM ohlcv_candles
-            WHERE pair = $1 AND timeframe = '1H'
-              AND timestamp >= ($2 - INTERVAL '300 hours')
-              AND timestamp <= $3
-            ORDER BY timestamp ASC
-            """,
-            run["pair"],
-            ps_dt,
-            pe_dt,
-        )
+            candle_rows = await conn.fetch(
+                """
+                SELECT timestamp, open, high, low, close
+                FROM ohlcv_candles
+                WHERE pair = $1 AND timeframe = '1H'
+                  AND timestamp >= ($2 - INTERVAL '300 hours')
+                  AND timestamp <= $3
+                ORDER BY timestamp ASC
+                """,
+                run["pair"],
+                ps_dt,
+                pe_dt,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("indicators [%s]: DB phase failed: %s", run_id, exc, exc_info=True)
+        return {"indicators": [], "error": f"DB: {type(exc).__name__}: {exc}"}
 
     if not candle_rows:
         return {"indicators": []}
