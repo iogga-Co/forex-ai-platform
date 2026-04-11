@@ -28,8 +28,26 @@ function entryCount(ir: Record<string, unknown>): number {
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
-function StrategyCard({ s }: { s: Strategy }) {
+function StrategyCard({ s, onDeleted }: { s: Strategy; onDeleted: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    setDeleting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/strategies/${s.id}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      onDeleted(s.id);
+    } catch {
+      setDeleting(false);
+      setConfirming(false);
+    }
+  }
 
   return (
     <div className="rounded-lg border border-surface-border bg-surface-raised p-4">
@@ -45,7 +63,7 @@ function StrategyCard({ s }: { s: Strategy }) {
             {entryCount(s.ir_json)} entry condition{entryCount(s.ir_json) !== 1 ? "s" : ""}
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-2 shrink-0 items-center">
           <button
             onClick={() => setExpanded((v) => !v)}
             className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-400 hover:text-gray-100 transition-colors"
@@ -58,6 +76,38 @@ function StrategyCard({ s }: { s: Strategy }) {
           >
             Backtest
           </Link>
+          {confirming ? (
+            <>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="rounded-md bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-500 transition-colors disabled:opacity-50"
+              >
+                {deleting ? "Deleting…" : "Confirm"}
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                disabled={deleting}
+                className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-400 hover:text-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirming(true)}
+              title="Delete strategy"
+              className="rounded-md border border-red-800 p-1.5 text-red-400 hover:bg-red-900/30 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
@@ -144,7 +194,11 @@ export default function StrategiesPage() {
       {!loading && !error && strategies.length > 0 && (
         <div className="space-y-3">
           {strategies.map((s) => (
-            <StrategyCard key={s.id} s={s} />
+            <StrategyCard
+              key={s.id}
+              s={s}
+              onDeleted={(id) => setStrategies((prev) => prev.filter((x) => x.id !== id))}
+            />
           ))}
         </div>
       )}

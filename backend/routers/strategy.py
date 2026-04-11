@@ -130,6 +130,25 @@ async def list_strategies(
     ]
 
 
+@router.delete("/{strategy_id}", status_code=204)
+async def delete_strategy(
+    strategy_id: UUID,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
+) -> None:
+    """Delete a strategy by ID."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM strategies WHERE id = $1",
+            strategy_id,
+        )
+
+    if result == "DELETE 0":
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    logger.info("Deleted strategy %s", strategy_id)
+
+
 @router.get("/{strategy_id}", response_model=StrategyResponse)
 async def get_strategy(
     strategy_id: UUID,

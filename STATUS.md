@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-10 (UI bug fixes: strategy names, Co-Pilot save, global auth guard)
+**Last updated:** 2026-04-11 (USDCHF backfill complete — all 6 pairs ready; Phase 4 unblocked)
 
 ---
 
@@ -41,7 +41,7 @@
 | USDJPY | ✅ 1,859,916 | ✅ 31,130 | Apr 2021 – Apr 2026 |
 | EURGBP | ✅ 1,854,281 | ✅ 31,129 | Apr 2021 – Apr 2026 |
 | GBPJPY | ✅ 1,857,964 | ✅ 31,139 | Apr 2021 – Apr 2026 |
-| USDCHF | 🔄 downloading | 🔄 downloading | Backfill running on staging since 2026-04-10 23:14 UTC; ~1.85M bars expected |
+| USDCHF | ✅ 1,846,046 | ✅ 31,134 | Apr 2021 – Apr 2026 (backfill completed 2026-04-11 08:43 UTC) |
 
 ---
 
@@ -384,5 +384,4 @@ Test count: **80 passed** (up from 58 at Phase 1 gate).
 
 | Item | Priority | Notes |
 |---|---|---|
-| USDCHF backfill | High | Running on staging since 2026-04-10 23:14 UTC. Monitor: `ssh root@86.48.16.255 "tail -f /tmp/usdchf_backfill.log"`. Check progress: `ssh root@86.48.16.255 "docker exec forex-ai-platform-timescaledb-1 psql -U forex_user -d forex_db -c 'SELECT timeframe, COUNT(*), MAX(timestamp)::date as latest FROM ohlcv_candles WHERE pair='\''USDCHF'\'' GROUP BY timeframe;'"` |
-| Phase 4 — Live Trading | Next | All 6 pairs must have data before starting. Begin once USDCHF backfill completes. |
+| Phase 4 — Live Trading | Next | All 6 pairs have full data. Ready to begin. |
