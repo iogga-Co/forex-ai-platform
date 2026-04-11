@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-11 (USDCHF backfill complete — all 6 pairs ready; Phase 4 unblocked)
+**Last updated:** 2026-04-11 (USDCHF backfill complete; strategy delete/restore UI; Phase 4 unblocked)
 
 ---
 
@@ -17,7 +17,7 @@
 
 ---
 
-## Current Staging State (2026-04-10)
+## Current Staging State (2026-04-11)
 
 | Item | Value |
 |---|---|
@@ -377,6 +377,24 @@ Test count: **80 passed** (up from 58 at Phase 1 gate).
 | #33 | Strategy names in backtest dropdown; `Authorization` header on Strategies page; Co-Pilot save pre-fills description from `metadata.description`; Claude system prompt updated to always emit `metadata.description` in SIR ✅ merged |
 | #34 | Global `AuthGuard` in root layout — suppresses render until token check completes ✅ merged |
 | #35 | Synchronous auth redirect — check runs in `useState` initializer before first paint; unauthenticated users land on `/login` immediately with no blank flash ✅ merged |
+
+---
+
+## UI Enhancements (2026-04-11)
+
+| PR | Change |
+|---|---|
+| #36 | STATUS.md update for 2026-04-10 session ✅ merged |
+| #37 | Strategy delete/restore — trash bin icon, soft-delete, Active/Deleted tab toggle, restore button ✅ merged |
+
+### Strategy delete/restore design (PR #37)
+
+- **Soft-delete**: `DELETE /api/strategies/{id}` sets `deleted_at = NOW()` — row is never removed
+- **RAG preserved**: deleted strategies remain in retrieval; labelled `[STRATEGY DELETED BY USER]` so the Co-Pilot learns which approaches were rejected and avoids reproposing them
+- **UI**: Strategies page has Active / Deleted tab toggle with counts; deleted cards are dimmed with a Restore button
+- **Restore**: `POST /api/strategies/{id}/restore` clears `deleted_at`; card moves back to Active tab instantly
+- **Backtest dropdown**: fetches from `GET /api/strategies` (filters `deleted_at IS NULL`) and re-fetches on tab visibility change — always in sync
+- **Migration**: `db/migrations/010_strategies_soft_delete.sql` — `ALTER TABLE strategies ADD COLUMN deleted_at TIMESTAMPTZ`
 
 ---
 
