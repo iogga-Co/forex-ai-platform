@@ -207,6 +207,7 @@ export default function CopilotPage() {
   const [pendingAssistant, setPendingAssistant] = useState("");
   const [sirProposal, setSirProposal] = useState<SirProposal | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const refineLoadedRef = useRef(false);
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -214,6 +215,39 @@ export default function CopilotPage() {
       router.push("/login");
     }
   }, [router]);
+
+  // If opened via Refine button (?strategy_id=&backtest_id=), pre-load context
+  useEffect(() => {
+    if (refineLoadedRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const strategyId = params.get("strategy_id");
+    const backtestId = params.get("backtest_id");
+    if (!strategyId || !backtestId) return;
+    refineLoadedRef.current = true;
+
+    Promise.all([
+      fetchWithAuth(`/api/strategies/${strategyId}`).then((r) => r.ok ? r.json() : null),
+      fetchWithAuth(`/api/backtest/results/${backtestId}`).then((r) => r.ok ? r.json() : null),
+    ]).then(([strategy, backtest]) => {
+      if (!strategy || !backtest) return;
+      // Pre-load IR into the inspector panel
+      setSirProposal(strategy.ir_json as SirProposal);
+      // Pre-fill chat input with a refinement prompt the user can review then send
+      const m = backtest.metrics;
+      const pct = (v: number | null) =>
+        v !== null && v !== undefined ? (v * 100).toFixed(1) + "%" : "—";
+      setInput(
+        `I want to refine this strategy: "${strategy.description}" (${strategy.pair} ${strategy.timeframe}).\n\n` +
+        `Last backtest (${backtest.period_start.slice(0, 10)} → ${backtest.period_end.slice(0, 10)}):\n` +
+        `- Sharpe: ${m.sharpe?.toFixed(2) ?? "—"}\n` +
+        `- Max Drawdown: ${pct(m.max_dd)}\n` +
+        `- Win Rate: ${pct(m.win_rate)}\n` +
+        `- Trades: ${m.trade_count}\n` +
+        `- Total P&L: $${m.total_pnl?.toFixed(0) ?? "—"}\n\n` +
+        `Please analyse these results and suggest specific improvements to the strategy rules.`
+      );
+    });
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

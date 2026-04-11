@@ -151,6 +151,57 @@ async def export_trades_csv(
     )
 
 
+@router.get("/backtest/{run_id}/candles")
+async def get_backtest_candles(
+    run_id: UUID,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
+) -> dict:
+    """
+    Return OHLCV candles for the pair/period of a backtest run.
+
+    Always serves 1H candles regardless of the backtest timeframe — this keeps
+    the dataset manageable (≤ ~17 500 bars for a 2-year window) while giving
+    enough resolution to see trade context.  Trade markers are placed at their
+    exact entry/exit timestamps via the nearest 1H bar.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow(
+            "SELECT pair, period_start, period_end FROM backtest_runs WHERE id = $1",
+            run_id,
+        )
+        if run is None:
+            raise HTTPException(status_code=404, detail="Backtest result not found")
+
+        candles = await conn.fetch(
+            """
+            SELECT timestamp, open, high, low, close
+            FROM ohlcv_candles
+            WHERE pair = $1 AND timeframe = '1H'
+              AND timestamp >= $2 AND timestamp <= $3
+            ORDER BY timestamp ASC
+            """,
+            run["pair"],
+            run["period_start"],
+            run["period_end"],
+        )
+
+    return {
+        "pair": run["pair"],
+        "timeframe": "1H",
+        "candles": [
+            {
+                "time": int(c["timestamp"].timestamp()),
+                "open": float(c["open"]),
+                "high": float(c["high"]),
+                "low": float(c["low"]),
+                "close": float(c["close"]),
+            }
+            for c in candles
+        ],
+    }
+
+
 @router.get("/strategies/compare")
 async def compare_strategies(
     ids: str = Query(..., description="Comma-separated strategy UUIDs (max 10)"),

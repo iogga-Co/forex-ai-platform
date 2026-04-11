@@ -1,8 +1,12 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchWithAuth, getAccessToken } from "@/lib/auth";
+import { createChart, CrosshairMode, LineStyle, type UTCTimestamp } from "lightweight-charts";
+
+const toTs = (iso: string): UTCTimestamp =>
+  Math.floor(new Date(iso).getTime() / 1000) as UTCTimestamp;
 import {
   Area,
   AreaChart,
@@ -104,14 +108,16 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
 // ---------------------------------------------------------------------------
 export default function BacktestResultPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
+  useRouter();
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
+  const [candles, setCandles] = useState<{ time: UTCTimestamp; open: number; high: number; low: number; close: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tradeFilter, setTradeFilter] = useState<"all" | "long" | "short" | "win" | "loss">("all");
   const [sortCol, setSortCol] = useState<keyof Trade>("entry_time");
   const [sortAsc, setSortAsc] = useState(true);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -121,14 +127,95 @@ export default function BacktestResultPage() {
         .then((r) => { if (!r.ok) throw new Error("Not found"); return r.json(); }),
       fetchWithAuth(`/api/analytics/backtest/${id}/equity-curve`)
         .then((r) => r.ok ? r.json() : { points: [] }),
+      fetchWithAuth(`/api/analytics/backtest/${id}/candles`)
+        .then((r) => r.ok ? r.json() : { candles: [] }),
     ])
-      .then(([res, eq]) => {
+      .then(([res, eq, candleData]) => {
         setResult(res);
         setEquityCurve(eq.points ?? []);
+        setCandles((candleData.candles ?? []).map((c: { time: number; open: number; high: number; low: number; close: number }) => ({ ...c, time: c.time as UTCTimestamp })));
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Build candlestick chart with trade overlays
+  useEffect(() => {
+    if (!chartContainerRef.current || candles.length === 0 || !result) return;
+
+    const container = chartContainerRef.current;
+    const chart = createChart(container, {
+      width: container.clientWidth,
+      height: 420,
+      layout: { background: { color: "#111827" }, textColor: "#9ca3af" },
+      grid: { vertLines: { color: "#1f2937" }, horzLines: { color: "#1f2937" } },
+      crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: { borderColor: "#374151" },
+      timeScale: { borderColor: "#374151", timeVisible: true, secondsVisible: false },
+    });
+
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderVisible: false,
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+    });
+    candleSeries.setData(candles);
+
+    // Entry/exit markers on the candlestick series
+    const markers = result.trades
+      .flatMap((t) => [
+        {
+          time: toTs(t.entry_time),
+          position: "belowBar" as const,
+          color: t.direction === "long" ? "#22c55e" : "#f97316",
+          shape: "arrowUp" as const,
+          text: "",
+        },
+        {
+          time: toTs(t.exit_time),
+          position: "aboveBar" as const,
+          color: t.pnl >= 0 ? "#22c55e" : "#ef4444",
+          shape: "arrowDown" as const,
+          text: "",
+        },
+      ])
+      .sort((a, b) => a.time - b.time);
+
+    candleSeries.setMarkers(markers);
+
+    // One line series per trade: entry → exit, coloured by outcome
+    result.trades.forEach((t) => {
+      const entryTs = toTs(t.entry_time);
+      const exitTs = toTs(t.exit_time);
+      if (entryTs === exitTs) return;
+      const line = chart.addLineSeries({
+        color: t.pnl >= 0 ? "#22c55e" : "#ef4444",
+        lineWidth: 1,
+        lineStyle: LineStyle.Solid,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      line.setData([
+        { time: entryTs, value: t.entry_price },
+        { time: exitTs, value: t.exit_price },
+      ]);
+    });
+
+    chart.timeScale().fitContent();
+
+    const handleResize = () => {
+      chart.applyOptions({ width: container.clientWidth });
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      chart.remove();
+    };
+  }, [candles, result]);
 
   if (loading) {
     return (
@@ -219,6 +306,20 @@ export default function BacktestResultPage() {
           sub={m.total_pnl >= 0 ? "profit" : "loss"}
         />
       </div>
+
+      {/* Candlestick chart with trade overlays */}
+      {candles.length > 0 && (
+        <div className="bg-gray-800 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-gray-300">Price Chart &amp; Trades</h2>
+            <div className="flex items-center gap-3 text-xs text-gray-500">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Winning trade</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Losing trade</span>
+            </div>
+          </div>
+          <div ref={chartContainerRef} className="w-full" />
+        </div>
+      )}
 
       {/* Equity curve */}
       {equityCurve.length > 0 && (
