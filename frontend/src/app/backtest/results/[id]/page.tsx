@@ -3,10 +3,13 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { fetchWithAuth, getAccessToken } from "@/lib/auth";
-import { createChart, CrosshairMode, LineStyle, type UTCTimestamp } from "lightweight-charts";
-
-const toTs = (iso: string): UTCTimestamp =>
-  Math.floor(new Date(iso).getTime() / 1000) as UTCTimestamp;
+import {
+  createChart,
+  CrosshairMode,
+  LineStyle,
+  type IChartApi,
+  type UTCTimestamp,
+} from "lightweight-charts";
 import {
   Area,
   AreaChart,
@@ -18,6 +21,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+const toTs = (iso: string): UTCTimestamp =>
+  Math.floor(new Date(iso).getTime() / 1000) as UTCTimestamp;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,6 +71,25 @@ interface EquityPoint {
   equity: number;
   cumulative_pnl: number;
   drawdown: number;
+}
+
+interface IndicatorSeries {
+  name: string;
+  color: string;
+  data: { time: number; value: number }[];
+}
+
+interface LevelLine {
+  value: number;
+  color: string;
+}
+
+interface IndicatorGroup {
+  id: string;
+  type: string;
+  pane: "overlay" | "oscillator";
+  levels?: LevelLine[];
+  series: IndicatorSeries[];
 }
 
 // ---------------------------------------------------------------------------
@@ -111,14 +139,23 @@ export default function BacktestResultPage() {
   useRouter();
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
-  const [candles, setCandles] = useState<{ time: UTCTimestamp; open: number; high: number; low: number; close: number }[]>([]);
+  const [candles, setCandles] = useState<
+    { time: UTCTimestamp; open: number; high: number; low: number; close: number }[]
+  >([]);
+  const [indicatorData, setIndicatorData] = useState<IndicatorGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tradeFilter, setTradeFilter] = useState<"all" | "long" | "short" | "win" | "loss">("all");
   const [sortCol, setSortCol] = useState<keyof Trade>("entry_time");
   const [sortAsc, setSortAsc] = useState(true);
-  const chartContainerRef = useRef<HTMLDivElement>(null);
 
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  // Map from oscillator group id → container element
+  const oscContainerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // ---------------------------------------------------------------------------
+  // Data fetch
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!id) return;
 
@@ -129,21 +166,36 @@ export default function BacktestResultPage() {
         .then((r) => r.ok ? r.json() : { points: [] }),
       fetchWithAuth(`/api/analytics/backtest/${id}/candles`)
         .then((r) => r.ok ? r.json() : { candles: [] }),
+      fetchWithAuth(`/api/analytics/backtest/${id}/indicators`)
+        .then((r) => r.ok ? r.json() : { indicators: [] }),
     ])
-      .then(([res, eq, candleData]) => {
+      .then(([res, eq, candleData, indData]) => {
         setResult(res);
         setEquityCurve(eq.points ?? []);
-        setCandles((candleData.candles ?? []).map((c: { time: number; open: number; high: number; low: number; close: number }) => ({ ...c, time: c.time as UTCTimestamp })));
+        setCandles(
+          (candleData.candles ?? []).map(
+            (c: { time: number; open: number; high: number; low: number; close: number }) => ({
+              ...c,
+              time: c.time as UTCTimestamp,
+            })
+          )
+        );
+        setIndicatorData(indData.indicators ?? []);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [id]);
 
-  // Build candlestick chart with trade overlays
+  // ---------------------------------------------------------------------------
+  // Chart effect — main candlestick + overlays + oscillator panes
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!chartContainerRef.current || candles.length === 0 || !result) return;
 
     const container = chartContainerRef.current;
+    const allCharts: IChartApi[] = [];
+
+    // ---- Main chart --------------------------------------------------------
     const chart = createChart(container, {
       width: container.clientWidth,
       height: 420,
@@ -153,6 +205,7 @@ export default function BacktestResultPage() {
       rightPriceScale: { borderColor: "#374151" },
       timeScale: { borderColor: "#374151", timeVisible: true, secondsVisible: false },
     });
+    allCharts.push(chart);
 
     const candleSeries = chart.addCandlestickSeries({
       upColor: "#22c55e",
@@ -163,7 +216,23 @@ export default function BacktestResultPage() {
     });
     candleSeries.setData(candles);
 
-    // Entry/exit markers on the candlestick series
+    // ---- Overlay indicators (EMA, SMA, BB) ---------------------------------
+    const overlays = indicatorData.filter((g) => g.pane === "overlay");
+    overlays.forEach((group) => {
+      group.series.forEach((s) => {
+        const line = chart.addLineSeries({
+          color: s.color,
+          lineWidth: 1,
+          lineStyle: LineStyle.Solid,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          crosshairMarkerVisible: false,
+        });
+        line.setData(s.data.map((d) => ({ time: d.time as UTCTimestamp, value: d.value })));
+      });
+    });
+
+    // ---- Trade markers -----------------------------------------------------
     const markers = result.trades
       .flatMap((t) => [
         {
@@ -185,7 +254,7 @@ export default function BacktestResultPage() {
 
     candleSeries.setMarkers(markers);
 
-    // One line series per trade: entry → exit, coloured by outcome
+    // One line series per trade: entry → exit coloured by outcome
     result.trades.forEach((t) => {
       const entryTs = toTs(t.entry_time);
       const exitTs = toTs(t.exit_time);
@@ -206,17 +275,98 @@ export default function BacktestResultPage() {
 
     chart.timeScale().fitContent();
 
+    // ---- Oscillator panes --------------------------------------------------
+    const oscillators = indicatorData.filter((g) => g.pane === "oscillator");
+    const oscPairs: { chart: IChartApi; el: HTMLDivElement }[] = [];
+
+    oscillators.forEach((group) => {
+      const el = oscContainerRefs.current.get(group.id);
+      if (!el) return;
+
+      const oscChart = createChart(el, {
+        width: el.clientWidth,
+        height: 120,
+        layout: { background: { color: "#111827" }, textColor: "#9ca3af" },
+        grid: { vertLines: { color: "#1f2937" }, horzLines: { color: "#1f2937" } },
+        crosshair: { mode: CrosshairMode.Normal },
+        rightPriceScale: { borderColor: "#374151" },
+        timeScale: { borderColor: "#374151", timeVisible: true, secondsVisible: false, visible: false },
+        leftPriceScale: { visible: false },
+      });
+      allCharts.push(oscChart);
+      oscPairs.push({ chart: oscChart, el });
+
+      let firstLine: ReturnType<typeof oscChart.addLineSeries> | null = null;
+
+      group.series.forEach((s, i) => {
+        const line = oscChart.addLineSeries({
+          color: s.color,
+          lineWidth: 1,
+          lineStyle: LineStyle.Solid,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          crosshairMarkerVisible: true,
+          title: s.name,
+        });
+        line.setData(s.data.map((d) => ({ time: d.time as UTCTimestamp, value: d.value })));
+        if (i === 0) firstLine = line;
+      });
+
+      // Horizontal reference levels via createPriceLine
+      if (firstLine && group.levels) {
+        group.levels.forEach((lv) => {
+          (firstLine!).createPriceLine({
+            price: lv.value,
+            color: lv.color,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: false,
+            title: "",
+          });
+        });
+      }
+    });
+
+    // ---- Sync time scales --------------------------------------------------
+    let syncing = false;
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (syncing || !range) return;
+      syncing = true;
+      oscPairs.forEach(({ chart: c }) => c.timeScale().setVisibleLogicalRange(range));
+      syncing = false;
+    });
+
+    oscPairs.forEach(({ chart: oscChart }) => {
+      oscChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+        if (syncing || !range) return;
+        syncing = true;
+        chart.timeScale().setVisibleLogicalRange(range);
+        oscPairs.forEach(({ chart: c }) => {
+          if (c !== oscChart) c.timeScale().setVisibleLogicalRange(range);
+        });
+        syncing = false;
+      });
+    });
+
+    // ---- Resize ------------------------------------------------------------
     const handleResize = () => {
       chart.applyOptions({ width: container.clientWidth });
+      oscPairs.forEach(({ chart: c, el }) => {
+        c.applyOptions({ width: el.clientWidth });
+      });
     };
     window.addEventListener("resize", handleResize);
 
     return () => {
       window.removeEventListener("resize", handleResize);
-      chart.remove();
+      allCharts.forEach((c) => c.remove());
     };
-  }, [candles, result]);
+  }, [candles, result, indicatorData]);
 
+  // ---------------------------------------------------------------------------
+  // Loading / error states
+  // ---------------------------------------------------------------------------
   if (loading) {
     return (
       <div className="space-y-4 animate-pulse">
@@ -265,12 +415,16 @@ export default function BacktestResultPage() {
 
   const token = getAccessToken() ?? "";
 
-  // Drawdown in percent for chart
   const ddPoints = equityCurve.map((p) => ({
     time: p.time,
     drawdown_pct: +(p.drawdown * 100).toFixed(2),
   }));
 
+  const oscillatorGroups = indicatorData.filter((g) => g.pane === "oscillator");
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
   return (
     <div className="space-y-6 max-w-6xl">
       {/* Header */}
@@ -307,17 +461,63 @@ export default function BacktestResultPage() {
         />
       </div>
 
-      {/* Candlestick chart with trade overlays */}
+      {/* Candlestick chart + indicator overlays + oscillator panes */}
       {candles.length > 0 && (
         <div className="bg-gray-800 rounded-lg p-4">
+          {/* Legend row */}
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-medium text-gray-300">Price Chart &amp; Trades</h2>
-            <div className="flex items-center gap-3 text-xs text-gray-500">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Winning trade</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Losing trade</span>
+            <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap justify-end">
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                Winning trade
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+                Losing trade
+              </span>
+              {indicatorData
+                .filter((g) => g.pane === "overlay")
+                .flatMap((g) => g.series)
+                .map((s) => (
+                  <span key={s.name} className="flex items-center gap-1">
+                    <span
+                      className="inline-block w-5 h-0.5 rounded"
+                      style={{ backgroundColor: s.color }}
+                    />
+                    {s.name}
+                  </span>
+                ))}
             </div>
           </div>
+
+          {/* Main chart */}
           <div ref={chartContainerRef} className="w-full" />
+
+          {/* Oscillator panes below main chart */}
+          {oscillatorGroups.map((group) => (
+            <div key={group.id} className="mt-px border-t border-gray-700">
+              <div className="flex items-center gap-3 px-1 py-1">
+                <span className="text-xs font-medium text-gray-500">{group.type}</span>
+                {group.series.map((s) => (
+                  <span key={s.name} className="flex items-center gap-1 text-xs text-gray-600">
+                    <span
+                      className="inline-block w-4 h-0.5 rounded"
+                      style={{ backgroundColor: s.color }}
+                    />
+                    {s.name}
+                  </span>
+                ))}
+              </div>
+              <div
+                ref={(el) => {
+                  if (el) oscContainerRefs.current.set(group.id, el);
+                  else oscContainerRefs.current.delete(group.id);
+                }}
+                className="w-full"
+              />
+            </div>
+          ))}
         </div>
       )}
 
