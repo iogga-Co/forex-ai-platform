@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { fetchWithAuth } from "@/lib/auth";
 
 interface Strategy {
   id: string;
@@ -71,15 +72,13 @@ export default function BacktestPage() {
 
   // Load strategies and history on mount; re-fetch strategies when tab regains focus
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (!token) {
+    if (!localStorage.getItem("access_token")) {
       setNotLoggedIn(true);
       return;
     }
-    const headers = { Authorization: `Bearer ${token}` };
 
     function loadStrategies() {
-      fetch("/api/strategies", { headers })
+      fetchWithAuth("/api/strategies")
         .then((r) => r.json())
         .then((data) => {
           const list: Strategy[] = Array.isArray(data) ? data : data.strategies ?? [];
@@ -94,7 +93,7 @@ export default function BacktestPage() {
 
     loadStrategies();
 
-    fetch("/api/backtest/results?limit=20", { headers })
+    fetchWithAuth("/api/backtest/results?limit=20")
       .then((r) => r.json())
       .then((data: RunSummary[]) => setHistory(Array.isArray(data) ? data : []))
       .catch(() => {});
@@ -107,12 +106,9 @@ export default function BacktestPage() {
   // Poll job status
   useEffect(() => {
     if (!jobId) return;
-    const token = localStorage.getItem("access_token");
     pollRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`/api/backtest/jobs/${jobId}/status`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetchWithAuth(`/api/backtest/jobs/${jobId}/status`);
         const data: JobStatus = await res.json();
         setJobStatus(data);
         if (data.status === "complete" && data.result_id) {
@@ -135,15 +131,11 @@ export default function BacktestPage() {
     setError(null);
     setJobId(null);
     setJobStatus(null);
-    const token = localStorage.getItem("access_token");
     const sessionId = crypto.randomUUID();
     try {
-      const res = await fetch(`/api/backtest?session_id=${sessionId}`, {
+      const res = await fetchWithAuth(`/api/backtest?session_id=${sessionId}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           strategy_id: form.strategy_id,
           pair: form.pair,

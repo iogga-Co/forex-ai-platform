@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { fetchWithAuth } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,15 +88,10 @@ function SirInspector({
     setSaveState("saving");
     setSaveError("");
 
-    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-
     try {
-      const res = await fetch(`${API_BASE}/api/strategies`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/strategies`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ir_json: sir,
           description: description.trim(),
@@ -241,22 +237,13 @@ export default function CopilotPage() {
     setStreaming(true);
     setPendingAssistant("");
 
-    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-
     try {
-      const res = await fetch(`${API_BASE}/api/copilot/chat`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/copilot/chat`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, message }),
       });
 
-      if (res.status === 401) {
-        router.push("/login");
-        return;
-      }
       if (!res.ok || !res.body) {
         throw new Error(`HTTP ${res.status}`);
       }

@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { fetchWithAuth, getAccessToken } from "@/lib/auth";
 import {
   Area,
   AreaChart,
@@ -113,20 +114,13 @@ export default function BacktestResultPage() {
   const [sortAsc, setSortAsc] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
     if (!id) return;
-    if (!token) {
-      router.push(`/login`);
-      return;
-    }
 
     Promise.all([
-      fetch(`/api/backtest/results/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).then((r) => { if (!r.ok) throw new Error("Not found"); return r.json(); }),
-      fetch(`/api/analytics/backtest/${id}/equity-curve`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).then((r) => r.ok ? r.json() : { points: [] }),
+      fetchWithAuth(`/api/backtest/results/${id}`)
+        .then((r) => { if (!r.ok) throw new Error("Not found"); return r.json(); }),
+      fetchWithAuth(`/api/analytics/backtest/${id}/equity-curve`)
+        .then((r) => r.ok ? r.json() : { points: [] }),
     ])
       .then(([res, eq]) => {
         setResult(res);
@@ -182,7 +176,7 @@ export default function BacktestResultPage() {
     else { setSortCol(col); setSortAsc(true); }
   }
 
-  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : "";
+  const token = getAccessToken() ?? "";
 
   // Drawdown in percent for chart
   const ddPoints = equityCurve.map((p) => ({
