@@ -12,6 +12,7 @@ GET /api/analytics/strategies/compare             — rank strategies by best me
 """
 
 import csv
+import datetime
 import io
 import logging
 from typing import Annotated
@@ -254,18 +255,27 @@ async def get_backtest_indicators(
         if not ir:
             return {"indicators": []}
 
+        # Convert DATE columns to UTC-aware datetimes for the timestamptz comparison
+        def _to_dt(d: "datetime.date | datetime.datetime") -> datetime.datetime:
+            if isinstance(d, datetime.datetime):
+                return d if d.tzinfo else d.replace(tzinfo=datetime.timezone.utc)
+            return datetime.datetime(d.year, d.month, d.day, tzinfo=datetime.timezone.utc)
+
+        ps_dt = _to_dt(run["period_start"])
+        pe_dt = _to_dt(run["period_end"])
+
         candle_rows = await conn.fetch(
             """
             SELECT timestamp, open, high, low, close
             FROM ohlcv_candles
             WHERE pair = $1 AND timeframe = '1H'
-              AND timestamp >= ($2::timestamptz - INTERVAL '300 hours')
+              AND timestamp >= ($2 - INTERVAL '300 hours')
               AND timestamp <= $3
             ORDER BY timestamp ASC
             """,
             run["pair"],
-            run["period_start"],
-            run["period_end"],
+            ps_dt,
+            pe_dt,
         )
 
     if not candle_rows:
@@ -330,7 +340,14 @@ async def get_backtest_indicators(
     if not specs:
         return {"indicators": []}
 
-    period_start = run["period_start"]
+    # period_start is a datetime.date (DATE column) — convert to UTC-aware datetime
+    # so it can be compared safely against the UTC-aware pandas DatetimeIndex.
+    raw_ps = run["period_start"]
+    if isinstance(raw_ps, datetime.datetime):
+        period_start = raw_ps if raw_ps.tzinfo else raw_ps.replace(tzinfo=datetime.timezone.utc)
+    else:
+        period_start = datetime.datetime(raw_ps.year, raw_ps.month, raw_ps.day,
+                                         tzinfo=datetime.timezone.utc)
 
     def to_points(series: "pd.Series") -> list[dict]:
         """Trim to period_start, drop NaN, convert to {time, value} dicts."""
