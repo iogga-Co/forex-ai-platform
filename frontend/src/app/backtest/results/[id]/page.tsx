@@ -175,8 +175,10 @@ export default function BacktestResultPage() {
           }
           return r.json();
         })
-        .then((d: { indicators: unknown[]; error?: string }) => {
-          if (d.error) console.error("[indicators] backend error:", d.error);
+        .then((d) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const err = (d as any)?.error as string | undefined;
+          if (err) console.error("[indicators] backend error:", err);
           console.log("[indicators] response:", JSON.stringify(d).slice(0, 500));
           return d;
         }),
