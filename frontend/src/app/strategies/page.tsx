@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { fetchWithAuth } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,7 @@ function StrategyCard({
   s: Strategy;
   onDeleted: (id: string) => void;
 }) {
+  const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -55,7 +57,10 @@ function StrategyCard({
   }
 
   return (
-    <div className="rounded-lg border border-surface-border bg-surface-raised p-4">
+    <div
+      className="rounded-lg border border-surface-border bg-surface-raised p-4 cursor-pointer hover:border-accent/50 transition-colors"
+      onClick={() => router.push(`/strategies/${s.id}`)}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -70,13 +75,14 @@ function StrategyCard({
         </div>
         <div className="flex gap-2 shrink-0 items-center">
           <button
-            onClick={() => setExpanded((v) => !v)}
+            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
             className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-400 hover:text-gray-100 transition-colors"
           >
             {expanded ? "Hide IR" : "View IR"}
           </button>
           <Link
             href={`/backtest?strategy_id=${s.id}&pair=${s.pair}&timeframe=${s.timeframe}`}
+            onClick={(e) => e.stopPropagation()}
             className="rounded-md bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent/80 transition-colors"
           >
             Backtest
@@ -84,14 +90,14 @@ function StrategyCard({
           {confirming ? (
             <>
               <button
-                onClick={handleDelete}
+                onClick={(e) => { e.stopPropagation(); handleDelete(); }}
                 disabled={deleting}
                 className="rounded-md bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-500 transition-colors disabled:opacity-50"
               >
                 {deleting ? "Deleting…" : "Confirm"}
               </button>
               <button
-                onClick={() => setConfirming(false)}
+                onClick={(e) => { e.stopPropagation(); setConfirming(false); }}
                 disabled={deleting}
                 className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-400 hover:text-gray-100 transition-colors"
               >
@@ -100,7 +106,7 @@ function StrategyCard({
             </>
           ) : (
             <button
-              onClick={() => setConfirming(true)}
+              onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
               title="Delete strategy"
               className="rounded-md border border-red-800 p-1.5 text-red-400 hover:bg-red-900/30 transition-colors"
             >

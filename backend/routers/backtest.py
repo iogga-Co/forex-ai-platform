@@ -145,26 +145,44 @@ async def get_backtest_status(
 @router.get("/results")
 async def list_backtest_results(
     limit: int = Query(default=20, ge=1, le=100),
+    strategy_id: UUID | None = Query(default=None),
     _: Annotated[TokenData | None, Depends(get_current_user)] = None,
 ) -> list[dict]:
     """
     List completed backtest runs, most recent first.
+    Optionally filter by strategy_id.
     Returns summary rows (no trades) for the history view.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, strategy_id, pair, timeframe,
-                   period_start, period_end,
-                   sharpe, max_dd, win_rate, trade_count, total_pnl,
-                   created_at
-            FROM backtest_runs
-            ORDER BY created_at DESC
-            LIMIT $1
-            """,
-            limit,
-        )
+        if strategy_id is not None:
+            rows = await conn.fetch(
+                """
+                SELECT id, strategy_id, pair, timeframe,
+                       period_start, period_end,
+                       sharpe, max_dd, win_rate, trade_count, total_pnl,
+                       created_at
+                FROM backtest_runs
+                WHERE strategy_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                strategy_id,
+                limit,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, strategy_id, pair, timeframe,
+                       period_start, period_end,
+                       sharpe, max_dd, win_rate, trade_count, total_pnl,
+                       created_at
+                FROM backtest_runs
+                ORDER BY created_at DESC
+                LIMIT $1
+                """,
+                limit,
+            )
     return [
         {
             "id": str(r["id"]),
