@@ -380,9 +380,9 @@ async def get_backtest_indicators(
             result_indicators.append({
                 "id": key, "type": "BB", "pane": "overlay",
                 "series": [
-                    {"name": f"BB Upper", "color": COLORS["BB_band"], "data": to_points(upper)},
-                    {"name": f"BB Middle", "color": COLORS["BB_mid"], "data": to_points(middle)},
-                    {"name": f"BB Lower", "color": COLORS["BB_band"], "data": to_points(lower)},
+                    {"name": "BB Upper", "color": COLORS["BB_band"], "data": to_points(upper)},
+                    {"name": "BB Middle", "color": COLORS["BB_mid"], "data": to_points(middle)},
+                    {"name": "BB Lower", "color": COLORS["BB_band"], "data": to_points(lower)},
                 ],
             })
 
