@@ -248,7 +248,7 @@ async def stop_run(
             detail=f"Run is {row['status']}, not running",
         )
 
-    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+    r = await aioredis.from_url(settings.redis_url, decode_responses=True)
     try:
         await r.set(_STOP_KEY.format(run_id=str(run_id)), "1", ex=3600)
     finally:
@@ -286,7 +286,7 @@ async def stream_run(
     channel = _SSE_CHANNEL.format(run_id=str(run_id))
 
     async def event_generator():
-        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+        r = await aioredis.from_url(settings.redis_url, decode_responses=True)
         pubsub = r.pubsub()
         try:
             await pubsub.subscribe(channel)
