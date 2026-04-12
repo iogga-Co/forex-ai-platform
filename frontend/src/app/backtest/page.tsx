@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { fetchWithAuth } from "@/lib/auth";
+import BacktestResultPanel from "@/components/BacktestResultPanel";
 
 interface Strategy {
   id: string;
@@ -53,9 +53,9 @@ function fmtDate(iso: string) {
 }
 
 export default function BacktestPage() {
-  const router = useRouter();
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [history, setHistory] = useState<RunSummary[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState({
     strategy_id: "",
     pair: "EURUSD",
@@ -70,7 +70,6 @@ export default function BacktestPage() {
   const [notLoggedIn, setNotLoggedIn] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Load strategies and history on mount; re-fetch strategies when tab regains focus
   useEffect(() => {
     if (!localStorage.getItem("access_token")) {
       setNotLoggedIn(true);
@@ -113,7 +112,13 @@ export default function BacktestPage() {
         setJobStatus(data);
         if (data.status === "complete" && data.result_id) {
           clearInterval(pollRef.current!);
-          router.push(`/backtest/results/${data.result_id}`);
+          setJobId(null);
+          // Add to history and open in panel
+          fetchWithAuth("/api/backtest/results?limit=20")
+            .then((r) => r.json())
+            .then((d: RunSummary[]) => setHistory(Array.isArray(d) ? d : []))
+            .catch(() => {});
+          setSelectedId(data.result_id);
         }
         if (data.status === "failed") {
           clearInterval(pollRef.current!);
@@ -124,7 +129,7 @@ export default function BacktestPage() {
       }
     }, 2000);
     return () => clearInterval(pollRef.current!);
-  }, [jobId, router]);
+  }, [jobId]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -162,9 +167,7 @@ export default function BacktestPage() {
         <h1 className="text-xl font-semibold text-gray-100">Backtest</h1>
         <p className="text-sm text-gray-400">
           You need to{" "}
-          <Link href="/login" className="text-blue-400 hover:underline">
-            sign in
-          </Link>{" "}
+          <Link href="/login" className="text-blue-400 hover:underline">sign in</Link>{" "}
           to run backtests.
         </p>
       </div>
@@ -172,179 +175,177 @@ export default function BacktestPage() {
   }
 
   return (
-    <div className="max-w-3xl space-y-8">
-      {/* ---- Form ---- */}
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-100">Backtest</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Run a strategy against historical OHLCV data. Results open automatically when complete.
-          </p>
+    <div className="flex h-full gap-0 overflow-hidden">
+
+      {/* ── Left panel: form + history ── */}
+      <div className="w-[400px] shrink-0 flex flex-col overflow-y-auto pr-6 border-r border-gray-800">
+
+        {/* Form */}
+        <div className="space-y-4 pb-6">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-100">Backtest</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Run a strategy against historical OHLCV data.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Strategy</label>
+              {strategies.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  No strategies yet —{" "}
+                  <Link href="/copilot" className="text-blue-400 hover:underline">
+                    create one in the Co-Pilot
+                  </Link>
+                </p>
+              ) : (
+                <select
+                  value={form.strategy_id}
+                  onChange={(e) => setForm({ ...form, strategy_id: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
+                >
+                  {strategies.map((s) => (
+                    <option key={s.id} value={s.id}>{stratName(s)}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Pair</label>
+                <select
+                  value={form.pair}
+                  onChange={(e) => setForm({ ...form, pair: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
+                >
+                  {PAIRS.map((p) => <option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Timeframe</label>
+                <select
+                  value={form.timeframe}
+                  onChange={(e) => setForm({ ...form, timeframe: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
+                >
+                  {TIMEFRAMES.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">From</label>
+                <input
+                  type="date"
+                  value={form.period_start}
+                  onChange={(e) => setForm({ ...form, period_start: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">To</label>
+                <input
+                  type="date"
+                  value={form.period_end}
+                  onChange={(e) => setForm({ ...form, period_end: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Initial capital ($)</label>
+              <input
+                type="number"
+                value={form.initial_capital}
+                onChange={(e) => setForm({ ...form, initial_capital: e.target.value })}
+                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={!form.strategy_id || !!jobId}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded px-4 py-2 transition-colors"
+            >
+              {jobId ? "Running…" : "Run Backtest"}
+            </button>
+          </form>
+
+          {jobStatus && jobStatus.status !== "complete" && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-gray-400">
+                <span className="capitalize">{jobStatus.status}</span>
+                <span>{jobStatus.progress_pct}%</span>
+              </div>
+              <div className="h-1.5 bg-gray-800 rounded">
+                <div
+                  className="h-1.5 bg-blue-500 rounded transition-all"
+                  style={{ width: `${jobStatus.progress_pct}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-3 py-2">
+              {error}
+            </p>
+          )}
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Strategy */}
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Strategy</label>
-            {strategies.length === 0 ? (
-              <p className="text-sm text-gray-500">
-                No strategies yet —{" "}
-                <Link href="/copilot" className="text-blue-400 hover:underline">
-                  create one in the Co-Pilot
-                </Link>
-              </p>
-            ) : (
-              <select
-                value={form.strategy_id}
-                onChange={(e) => setForm({ ...form, strategy_id: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-              >
-                {strategies.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {stratName(s)}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Pair</label>
-              <select
-                value={form.pair}
-                onChange={(e) => setForm({ ...form, pair: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-              >
-                {PAIRS.map((p) => <option key={p}>{p}</option>)}
-              </select>
+        {/* History */}
+        <div className="space-y-2 flex-1">
+          <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Recent runs
+          </h2>
+          {history.length === 0 ? (
+            <p className="text-sm text-gray-600">No completed backtests yet.</p>
+          ) : (
+            <div className="space-y-1">
+              {history.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedId(r.id)}
+                  className={[
+                    "w-full text-left rounded-lg border px-3 py-2.5 transition-colors",
+                    selectedId === r.id
+                      ? "border-blue-600 bg-blue-900/20"
+                      : "border-gray-800 hover:border-gray-700 hover:bg-gray-800/50",
+                  ].join(" ")}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-gray-200">{r.pair}</span>
+                    <span className="text-xs text-gray-500">{r.timeframe}</span>
+                    <span className={`text-xs font-medium ml-auto ${r.total_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {r.total_pnl >= 0 ? "+" : ""}${fmt(r.total_pnl, 0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1 text-xs text-gray-600">
+                    <span>{r.period_start.slice(0, 10)} → {r.period_end.slice(0, 10)}</span>
+                    <span>Sh {fmt(r.sharpe)} · W {fmtPct(r.win_rate)}</span>
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-gray-700">{fmtDate(r.created_at)}</div>
+                </button>
+              ))}
             </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Timeframe</label>
-              <select
-                value={form.timeframe}
-                onChange={(e) => setForm({ ...form, timeframe: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-              >
-                {TIMEFRAMES.map((t) => <option key={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">From</label>
-              <input
-                type="date"
-                value={form.period_start}
-                onChange={(e) => setForm({ ...form, period_start: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">To</label>
-              <input
-                type="date"
-                value={form.period_end}
-                onChange={(e) => setForm({ ...form, period_end: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Initial capital ($)</label>
-            <input
-              type="number"
-              value={form.initial_capital}
-              onChange={(e) => setForm({ ...form, initial_capital: e.target.value })}
-              className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={!form.strategy_id || !!jobId}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded px-4 py-2"
-          >
-            {jobId ? "Running…" : "Run Backtest"}
-          </button>
-        </form>
-
-        {jobStatus && jobStatus.status !== "complete" && (
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs text-gray-400">
-              <span className="capitalize">{jobStatus.status}</span>
-              <span>{jobStatus.progress_pct}%</span>
-            </div>
-            <div className="h-1.5 bg-gray-800 rounded">
-              <div
-                className="h-1.5 bg-blue-500 rounded transition-all"
-                style={{ width: `${jobStatus.progress_pct}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-3 py-2">
-            {error}
-          </p>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* ---- History ---- */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-medium text-gray-300">Recent runs</h2>
-        {history.length === 0 ? (
-          <p className="text-sm text-gray-500">No completed backtests yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-gray-500 border-b border-gray-800">
-                  <th className="text-left pb-2 font-normal">Date</th>
-                  <th className="text-left pb-2 font-normal">Pair</th>
-                  <th className="text-left pb-2 font-normal">TF</th>
-                  <th className="text-left pb-2 font-normal">Period</th>
-                  <th className="text-right pb-2 font-normal">Sharpe</th>
-                  <th className="text-right pb-2 font-normal">Max DD</th>
-                  <th className="text-right pb-2 font-normal">Win%</th>
-                  <th className="text-right pb-2 font-normal">Trades</th>
-                  <th className="text-right pb-2 font-normal">P&amp;L</th>
-                  <th className="pb-2" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800">
-                {history.map((r) => (
-                  <tr key={r.id} className="hover:bg-gray-800/50 transition-colors">
-                    <td className="py-2 pr-4 text-gray-400 whitespace-nowrap">
-                      {fmtDate(r.created_at)}
-                    </td>
-                    <td className="py-2 pr-4 text-gray-200">{r.pair}</td>
-                    <td className="py-2 pr-4 text-gray-400">{r.timeframe}</td>
-                    <td className="py-2 pr-4 text-gray-500 whitespace-nowrap text-xs">
-                      {r.period_start.slice(0, 10)} → {r.period_end.slice(0, 10)}
-                    </td>
-                    <td className="py-2 pr-4 text-right text-gray-200">{fmt(r.sharpe)}</td>
-                    <td className="py-2 pr-4 text-right text-red-400">{fmtPct(r.max_dd)}</td>
-                    <td className="py-2 pr-4 text-right text-gray-200">{fmtPct(r.win_rate)}</td>
-                    <td className="py-2 pr-4 text-right text-gray-400">{r.trade_count}</td>
-                    <td className={`py-2 pr-4 text-right font-medium ${r.total_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {r.total_pnl >= 0 ? "+" : ""}{fmt(r.total_pnl)}
-                    </td>
-                    <td className="py-2 text-right">
-                      <Link
-                        href={`/backtest/results/${r.id}`}
-                        className="text-blue-400 hover:underline text-xs"
-                      >
-                        View →
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {/* ── Right panel: result detail ── */}
+      {selectedId ? (
+        <div className="flex-1 overflow-y-auto pl-6 min-w-0">
+          <BacktestResultPanel
+            id={selectedId}
+            onClose={() => setSelectedId(null)}
+          />
+        </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center text-sm text-gray-700 select-none">
+          {history.length > 0 ? "← Select a run to view results" : ""}
+        </div>
+      )}
     </div>
   );
 }
