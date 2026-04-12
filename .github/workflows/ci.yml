@@ -291,7 +291,9 @@ jobs:
             cd /opt/forex-ai-platform
             git pull origin main
             doppler run -- docker compose build fastapi celery nextjs
-            doppler run -- docker compose up -d --remove-orphans --force-recreate
+            # Remove any orphan containers with conflicting names before recreating
+            docker rm -f forex-ai-platform-fastapi-1 forex-ai-platform-celery-1 forex-ai-platform-nextjs-1 2>/dev/null || true
+            doppler run -- docker compose up -d --remove-orphans
             # Reload nginx to flush stale upstream IPs after container rebuild
             docker exec forex-ai-platform-nginx-1 nginx -s reload
 
