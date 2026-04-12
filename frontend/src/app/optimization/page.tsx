@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { fetchWithAuth } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,12 @@ interface OptRun {
   best_strategy_id: string | null;
   stop_reason: string | null;
   created_at: string;
+  initial_strategy_id: string | null;
+  system_prompt: string;
+  user_prompt: string;
+  time_limit_minutes: number;
+  target_sharpe: number | null;
+  target_win_rate: number | null;
 }
 
 interface Iteration {
@@ -128,17 +135,26 @@ function IterationRow({ iter, isBest }: { iter: Iteration; isBest: boolean }) {
 // Main page
 // ---------------------------------------------------------------------------
 export default function OptimizationPage() {
+  return (
+    <Suspense>
+      <OptimizationPageInner />
+    </Suspense>
+  );
+}
+
+function OptimizationPageInner() {
+  const searchParams = useSearchParams();
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [runs, setRuns] = useState<OptRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<OptRun | null>(null);
   const [iterations, setIterations] = useState<Iteration[]>([]);
   const [liveEvents, setLiveEvents] = useState<SseEvent[]>([]);
   const [form, setForm] = useState({
-    strategy_id: "",
-    pair: "EURUSD",
-    timeframe: "1H",
-    period_start: "2022-01-01",
-    period_end: "2024-01-01",
+    strategy_id: searchParams.get("strategy_id") ?? "",
+    pair: searchParams.get("pair") ?? "EURUSD",
+    timeframe: searchParams.get("timeframe") ?? "1H",
+    period_start: searchParams.get("period_start") ?? "2022-01-01",
+    period_end: searchParams.get("period_end") ?? "2024-01-01",
     system_prompt: "",
     user_prompt: "",
     max_iterations: "20",
@@ -349,6 +365,47 @@ export default function OptimizationPage() {
     }
   }
 
+  function handleResubmit(run: OptRun) {
+    setForm({
+      strategy_id: run.initial_strategy_id ?? "",
+      pair: run.pair,
+      timeframe: run.timeframe,
+      period_start: run.period_start,
+      period_end: run.period_end,
+      system_prompt: run.system_prompt,
+      user_prompt: run.user_prompt,
+      max_iterations: String(run.max_iterations),
+      time_limit_minutes: String(run.time_limit_minutes),
+      target_sharpe: run.target_sharpe != null ? String(run.target_sharpe) : "",
+      target_win_rate: run.target_win_rate != null ? String(Math.round(run.target_win_rate * 100)) : "",
+    });
+    // Scroll form into view by deselecting the run so the left panel is visible
+    setSelectedRun(null);
+  }
+
+  async function handleDelete(run: OptRun) {
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/optimization/runs/${run.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok && res.status !== 204) {
+        const err = await res.json().catch(() => ({}));
+        console.error("Delete failed:", err.detail ?? `HTTP ${res.status}`);
+        return;
+      }
+      setRuns((prev) => prev.filter((r) => r.id !== run.id));
+      if (selectedRun?.id === run.id) {
+        setSelectedRun(null);
+        setIterations([]);
+        setLiveEvents([]);
+        esRef.current?.close();
+        esRef.current = null;
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+
   if (notLoggedIn) {
     return (
       <div className="flex h-screen items-center justify-center bg-zinc-900 text-zinc-300">
@@ -375,10 +432,10 @@ export default function OptimizationPage() {
             <p className="p-4 text-xs text-zinc-500">No runs yet. Create one below.</p>
           )}
           {runs.map((run) => (
-            <button
+            <div
               key={run.id}
               onClick={() => selectRun(run)}
-              className={`w-full text-left px-4 py-3 border-b border-zinc-700 hover:bg-zinc-700/50 transition-colors ${
+              className={`w-full text-left px-4 py-3 border-b border-zinc-700 hover:bg-zinc-700/50 transition-colors cursor-pointer ${
                 selectedRun?.id === run.id ? "bg-zinc-700" : ""
               }`}
             >
@@ -398,7 +455,32 @@ export default function OptimizationPage() {
                   Best Sharpe: {fmt(run.best_sharpe)} · WR: {fmtPct(run.best_win_rate)}
                 </div>
               )}
-            </button>
+              {run.status !== "running" && (
+                <div
+                  className="flex items-center gap-2 mt-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => handleResubmit(run)}
+                    className="flex-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded px-2 py-1 transition-colors"
+                  >
+                    Resubmit
+                  </button>
+                  <button
+                    onClick={() => handleDelete(run)}
+                    className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+                    title="Delete run"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                      <path d="M10 11v6M14 11v6" />
+                      <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </div>
           ))}
         </div>
 

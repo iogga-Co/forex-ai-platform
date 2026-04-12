@@ -79,6 +79,13 @@ class RunResponse(BaseModel):
     best_strategy_id: str | None
     stop_reason: str | None
     created_at: str
+    # Fields needed for Resubmit
+    initial_strategy_id: str | None
+    system_prompt: str
+    user_prompt: str
+    time_limit_minutes: int
+    target_sharpe: float | None
+    target_win_rate: float | None
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +120,9 @@ async def create_run(
                 period_start, period_end,
                 max_iterations, current_iteration,
                 best_sharpe, best_win_rate, best_iteration, best_strategy_id,
-                stop_reason, created_at
+                stop_reason, created_at,
+                initial_strategy_id, system_prompt, user_prompt,
+                time_limit_minutes, target_sharpe, target_win_rate
             """,
             user.sub,
             payload.pair,
@@ -150,7 +159,9 @@ async def list_runs(
                    period_start, period_end,
                    max_iterations, current_iteration,
                    best_sharpe, best_win_rate, best_iteration, best_strategy_id,
-                   stop_reason, created_at
+                   stop_reason, created_at,
+                   initial_strategy_id, system_prompt, user_prompt,
+                   time_limit_minutes, target_sharpe, target_win_rate
             FROM optimization_runs
             WHERE user_id = $1
             ORDER BY created_at DESC
@@ -180,7 +191,9 @@ async def get_run(
                    period_start, period_end,
                    max_iterations, current_iteration,
                    best_sharpe, best_win_rate, best_iteration, best_strategy_id,
-                   stop_reason, created_at
+                   stop_reason, created_at,
+                   initial_strategy_id, system_prompt, user_prompt,
+                   time_limit_minutes, target_sharpe, target_win_rate
             FROM optimization_runs
             WHERE id = $1 AND user_id = $2
             """,
@@ -368,6 +381,41 @@ async def list_iterations(
 
 
 # ---------------------------------------------------------------------------
+# DELETE /api/optimization/runs/{run_id}  — delete run + iterations
+# ---------------------------------------------------------------------------
+
+@router.delete("/runs/{run_id}", status_code=204)
+async def delete_run(
+    run_id: UUID,
+    user: Annotated[TokenData, Depends(get_current_user)],
+    pool=Depends(get_pool),
+):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status FROM optimization_runs WHERE id = $1 AND user_id = $2",
+            str(run_id),
+            user.sub,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Optimization run not found")
+    if row["status"] == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a running optimization — stop it first",
+        )
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM optimization_iterations WHERE run_id = $1", str(run_id)
+        )
+        await conn.execute(
+            "DELETE FROM optimization_runs WHERE id = $1", str(run_id)
+        )
+
+    logger.info("Deleted optimization run %s", run_id)
+
+
+# ---------------------------------------------------------------------------
 # Internal helper
 # ---------------------------------------------------------------------------
 
@@ -387,4 +435,10 @@ def _row_to_run(row) -> RunResponse:
         best_strategy_id=str(row["best_strategy_id"]) if row["best_strategy_id"] else None,
         stop_reason=row["stop_reason"],
         created_at=row["created_at"].isoformat(),
+        initial_strategy_id=str(row["initial_strategy_id"]) if row["initial_strategy_id"] else None,
+        system_prompt=row["system_prompt"] or "",
+        user_prompt=row["user_prompt"] or "",
+        time_limit_minutes=row["time_limit_minutes"],
+        target_sharpe=_f(row["target_sharpe"]),
+        target_win_rate=_f(row["target_win_rate"]),
     )
