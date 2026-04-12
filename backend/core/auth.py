@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -53,3 +53,27 @@ def decode_token(token: str, expected_type: str = "access") -> TokenData:
 
 async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> TokenData:
     return decode_token(token, expected_type="access")
+
+
+async def get_current_user_sse(
+    request: Request,
+    token: Annotated[str | None, Query()] = None,
+) -> TokenData:
+    """Auth dependency for SSE endpoints.
+
+    EventSource cannot set custom headers, so the JWT is passed as
+    ``?token=<jwt>`` query parameter. Falls back to the Authorization
+    header so the endpoint still works in non-browser contexts.
+    """
+    raw = token
+    if not raw:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            raw = auth_header[7:]
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return decode_token(raw, expected_type="access")

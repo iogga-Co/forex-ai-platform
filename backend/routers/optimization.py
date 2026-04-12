@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from core.auth import TokenData, get_current_user
+from core.auth import TokenData, get_current_user, get_current_user_sse
 from core.config import settings
 from core.db import get_pool
 from tasks.optimization import run_optimization_task
@@ -265,7 +265,7 @@ async def stop_run(
 @router.get("/runs/{run_id}/stream")
 async def stream_run(
     run_id: UUID,
-    user: Annotated[TokenData, Depends(get_current_user)],
+    user: Annotated[TokenData, Depends(get_current_user_sse)],
     pool=Depends(get_pool),
 ):
     """
