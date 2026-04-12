@@ -3,7 +3,7 @@
 
 CREATE TABLE optimization_runs (
     id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id             UUID        REFERENCES users(id),
+    user_id             TEXT,
     pair                VARCHAR(10) NOT NULL,
     timeframe           VARCHAR(10) NOT NULL,
     period_start        DATE        NOT NULL,

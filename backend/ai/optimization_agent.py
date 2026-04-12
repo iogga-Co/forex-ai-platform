@@ -362,7 +362,7 @@ def analyze_and_mutate(
                 model="claude-opus-4-6",
                 max_tokens=1024,
                 system=_build_system_prompt(user_system_prompt),
-                messages=messages,
+                messages=messages,  # type: ignore[arg-type]
                 tools=OPTIMIZATION_TOOLS,  # type: ignore[arg-type]
             )
         except Exception as exc:

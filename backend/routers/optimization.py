@@ -114,7 +114,7 @@ async def create_run(
                 best_sharpe, best_win_rate, best_iteration, best_strategy_id,
                 stop_reason, created_at
             """,
-            str(user.user_id),
+            user.sub,
             payload.pair,
             payload.timeframe,
             payload.period_start,
@@ -155,7 +155,7 @@ async def list_runs(
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
             """,
-            str(user.user_id),
+            user.sub,
             limit,
             offset,
         )
@@ -184,7 +184,7 @@ async def get_run(
             WHERE id = $1 AND user_id = $2
             """,
             str(run_id),
-            str(user.user_id),
+            user.sub,
         )
     if row is None:
         raise HTTPException(status_code=404, detail="Optimization run not found")
@@ -205,7 +205,7 @@ async def start_run(
         row = await conn.fetchrow(
             "SELECT status FROM optimization_runs WHERE id = $1 AND user_id = $2",
             str(run_id),
-            str(user.user_id),
+            user.sub,
         )
     if row is None:
         raise HTTPException(status_code=404, detail="Optimization run not found")
@@ -237,7 +237,7 @@ async def stop_run(
         row = await conn.fetchrow(
             "SELECT status FROM optimization_runs WHERE id = $1 AND user_id = $2",
             str(run_id),
-            str(user.user_id),
+            user.sub,
         )
     if row is None:
         raise HTTPException(status_code=404, detail="Optimization run not found")
@@ -277,7 +277,7 @@ async def stream_run(
         row = await conn.fetchrow(
             "SELECT status FROM optimization_runs WHERE id = $1 AND user_id = $2",
             str(run_id),
-            str(user.user_id),
+            user.sub,
         )
     if row is None:
         raise HTTPException(status_code=404, detail="Optimization run not found")
@@ -336,7 +336,7 @@ async def list_iterations(
         )
         if owner is None:
             raise HTTPException(status_code=404, detail="Optimization run not found")
-        if str(owner) != str(user.user_id):
+        if str(owner) != user.sub:
             raise HTTPException(status_code=403, detail="Forbidden")
 
         rows = await conn.fetch(

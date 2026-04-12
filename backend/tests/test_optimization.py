@@ -41,8 +41,6 @@ MINIMAL_IR = {
 # ===========================================================================
 
 class TestApplyToolCall:
-    from ai.optimization_agent import apply_tool_call
-
     def _apply(self, tool_name: str, tool_input: dict) -> dict:
         from ai.optimization_agent import apply_tool_call
         return apply_tool_call(copy.deepcopy(MINIMAL_IR), tool_name, tool_input)
@@ -259,7 +257,7 @@ class TestOptimizationRouter:
         import uuid
 
         self.run_id = str(uuid.uuid4())
-        self.user_id = str(uuid.uuid4())
+        self.user_sub = "operator"
         self.strategy_id = str(uuid.uuid4())
 
         # Fake run row returned by DB queries
@@ -279,11 +277,11 @@ class TestOptimizationRouter:
             "best_strategy_id": None,
             "stop_reason": None,
             "created_at": datetime.datetime(2026, 4, 10, 12, 0, 0, tzinfo=datetime.timezone.utc),
-            "user_id": self.user_id,
+            "user_id": self.user_sub,
         }
 
         with (
-            patch("core.auth.get_current_user", return_value=MagicMock(user_id=self.user_id)),
+            patch("core.auth.get_current_user", return_value=MagicMock(sub=self.user_sub)),
             patch("core.db.get_pool") as mock_pool_dep,
         ):
             mock_conn = AsyncMock()
@@ -291,7 +289,7 @@ class TestOptimizationRouter:
             mock_conn.__aexit__ = AsyncMock(return_value=None)
             mock_conn.fetchrow = AsyncMock(return_value=self.fake_run)
             mock_conn.fetch = AsyncMock(return_value=[self.fake_run])
-            mock_conn.fetchval = AsyncMock(return_value=self.user_id)
+            mock_conn.fetchval = AsyncMock(return_value=self.user_sub)
 
             mock_pool = MagicMock()
             mock_pool.acquire = MagicMock(return_value=mock_conn)
