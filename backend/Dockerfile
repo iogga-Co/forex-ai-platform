@@ -17,6 +17,4 @@ USER appuser
 
 EXPOSE 8000
 
-# --reload enables hot-reloading when ./backend is volume-mounted in dev.
-# In production, the volume mount is removed and code is baked into the image.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
