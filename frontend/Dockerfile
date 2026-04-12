@@ -5,22 +5,25 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
 WORKDIR /app
 
-# Install dependencies first (separate layer for Docker cache efficiency)
+# Install dependencies (separate layer for Docker cache efficiency)
 COPY package.json package-lock.json* ./
 RUN npm ci
 
 # Copy application code
 COPY . .
 
-# Ensure .next is writable by appuser — the Docker anonymous volume for /app/.next
-# inherits ownership from the image, so this must be set before USER switches.
-RUN mkdir -p .next && chown -R appuser:appgroup .next
+# Build the Next.js app.
+# NEXT_PUBLIC_API_URL is intentionally left empty here — all API calls in the
+# codebase fall back to relative paths (e.g. /api/...) which nginx proxies
+# correctly, so no build-time value is needed.
+RUN npm run build
+
+# Fix ownership of the built output before dropping privileges
+RUN chown -R appuser:appgroup .next
 
 # Switch to non-root user
 USER appuser
 
 EXPOSE 3000
 
-# Dev: hot-reload via volume mount.
-# Production: override CMD to: npm run build && npm start
-CMD ["npm", "run", "dev"]
+CMD ["npm", "start"]
