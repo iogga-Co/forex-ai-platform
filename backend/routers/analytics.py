@@ -265,17 +265,18 @@ async def get_backtest_indicators(
             ps_dt = _to_dt(run["period_start"])
             pe_dt = _to_dt(run["period_end"])
 
+            warmup_start = ps_dt - datetime.timedelta(hours=300)
             candle_rows = await conn.fetch(
                 """
                 SELECT timestamp, open, high, low, close
                 FROM ohlcv_candles
                 WHERE pair = $1 AND timeframe = '1H'
-                  AND timestamp >= ($2 - INTERVAL '300 hours')
+                  AND timestamp >= $2
                   AND timestamp <= $3
                 ORDER BY timestamp ASC
                 """,
                 run["pair"],
-                ps_dt,
+                warmup_start,
                 pe_dt,
             )
     except HTTPException:
