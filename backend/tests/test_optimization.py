@@ -11,7 +11,6 @@ All tests run without a real database, Redis, or Anthropic API key.
 """
 
 import copy
-import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 

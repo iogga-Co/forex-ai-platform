@@ -27,7 +27,6 @@ Safety
 
 import json
 import logging
-from datetime import datetime, timezone
 
 import psycopg2
 import redis
