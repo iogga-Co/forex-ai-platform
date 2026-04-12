@@ -291,11 +291,12 @@ export default function BacktestResultPage() {
 
     // ---- Oscillator panes --------------------------------------------------
     const oscillators = indicatorData.filter((g) => g.pane === "oscillator");
+    console.log("[chart] oscillators:", oscillators.length, "refs:", oscContainerRefs.current.size);
     const oscPairs: { chart: IChartApi; el: HTMLDivElement }[] = [];
 
     oscillators.forEach((group) => {
       const el = oscContainerRefs.current.get(group.id);
-      if (!el) return;
+      if (!el) { console.warn("[chart] no container ref for oscillator", group.id); return; }
 
       const oscChart = createChart(el, {
         width: el.clientWidth,
