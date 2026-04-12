@@ -291,12 +291,22 @@ export default function BacktestResultPage() {
 
     // ---- Oscillator panes --------------------------------------------------
     const oscillators = indicatorData.filter((g) => g.pane === "oscillator");
-    console.log("[chart] oscillators:", oscillators.length, "refs:", oscContainerRefs.current.size);
-    const oscPairs: { chart: IChartApi; el: HTMLDivElement }[] = [];
+
+    // Build candle close lookup for crosshair sync (time → close price)
+    const candleClose = new Map<number, number>();
+    candles.forEach((c) => candleClose.set(c.time as number, c.close));
+
+    type OscPair = {
+      chart: IChartApi;
+      el: HTMLDivElement;
+      firstSeries: ReturnType<IChartApi["addLineSeries"]>;
+      timeToValue: Map<number, number>;
+    };
+    const oscPairs: OscPair[] = [];
 
     oscillators.forEach((group) => {
       const el = oscContainerRefs.current.get(group.id);
-      if (!el) { console.warn("[chart] no container ref for oscillator", group.id); return; }
+      if (!el) return;
 
       const oscChart = createChart(el, {
         width: el.clientWidth,
@@ -309,9 +319,9 @@ export default function BacktestResultPage() {
         leftPriceScale: { visible: false },
       });
       allCharts.push(oscChart);
-      oscPairs.push({ chart: oscChart, el });
 
-      let firstLine: ReturnType<typeof oscChart.addLineSeries> | null = null;
+      let firstSeries: ReturnType<typeof oscChart.addLineSeries> | null = null;
+      const timeToValue = new Map<number, number>();
 
       group.series.forEach((s, i) => {
         const line = oscChart.addLineSeries({
@@ -324,13 +334,16 @@ export default function BacktestResultPage() {
           title: s.name,
         });
         line.setData(s.data.map((d) => ({ time: d.time as UTCTimestamp, value: d.value })));
-        if (i === 0) firstLine = line;
+        if (i === 0) {
+          firstSeries = line;
+          s.data.forEach((d) => timeToValue.set(d.time, d.value));
+        }
       });
 
       // Horizontal reference levels via createPriceLine
-      if (firstLine && group.levels) {
+      if (firstSeries && group.levels) {
         group.levels.forEach((lv) => {
-          (firstLine!).createPriceLine({
+          (firstSeries!).createPriceLine({
             price: lv.value,
             color: lv.color,
             lineWidth: 1,
@@ -339,6 +352,10 @@ export default function BacktestResultPage() {
             title: "",
           });
         });
+      }
+
+      if (firstSeries) {
+        oscPairs.push({ chart: oscChart, el, firstSeries, timeToValue });
       }
     });
 
@@ -361,6 +378,49 @@ export default function BacktestResultPage() {
           if (c !== oscChart) c.timeScale().setVisibleLogicalRange(range);
         });
         syncing = false;
+      });
+    });
+
+    // ---- Sync crosshairs ---------------------------------------------------
+    let crosshairSyncing = false;
+
+    // Main chart → oscillators
+    chart.subscribeCrosshairMove((param) => {
+      if (crosshairSyncing) return;
+      crosshairSyncing = true;
+      oscPairs.forEach(({ chart: c, firstSeries: fs, timeToValue }) => {
+        if (!param.time) {
+          c.clearCrosshairPosition();
+        } else {
+          const v = timeToValue.get(param.time as number);
+          if (v !== undefined) c.setCrosshairPosition(v, param.time, fs);
+          else c.clearCrosshairPosition();
+        }
+      });
+      crosshairSyncing = false;
+    });
+
+    // Each oscillator → main chart + other oscillators
+    oscPairs.forEach(({ chart: oscChart }) => {
+      oscChart.subscribeCrosshairMove((param) => {
+        if (crosshairSyncing) return;
+        crosshairSyncing = true;
+        if (!param.time) {
+          chart.clearCrosshairPosition();
+          oscPairs.forEach(({ chart: c }) => { if (c !== oscChart) c.clearCrosshairPosition(); });
+        } else {
+          const t = param.time!;
+          const close = candleClose.get(t as number);
+          if (close !== undefined) chart.setCrosshairPosition(close, t, candleSeries);
+          else chart.clearCrosshairPosition();
+          oscPairs.forEach(({ chart: c, firstSeries: fs, timeToValue }) => {
+            if (c === oscChart) return;
+            const v = timeToValue.get(t as number);
+            if (v !== undefined) c.setCrosshairPosition(v, t, fs);
+            else c.clearCrosshairPosition();
+          });
+        }
+        crosshairSyncing = false;
       });
     });
 
