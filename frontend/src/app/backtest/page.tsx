@@ -52,10 +52,32 @@ function fmtDate(iso: string) {
   });
 }
 
+type SortKey = "created_at" | "sharpe" | "win_rate" | "trade_count" | "total_pnl";
+type SortDir = "asc" | "desc";
+
+const SORT_LABELS: Record<SortKey, string> = {
+  created_at: "Date",
+  sharpe: "Sharpe",
+  win_rate: "Win %",
+  trade_count: "Trades",
+  total_pnl: "PnL",
+};
+
+function sortRuns(runs: RunSummary[], key: SortKey, dir: SortDir): RunSummary[] {
+  return [...runs].sort((a, b) => {
+    const av = a[key] ?? (dir === "desc" ? -Infinity : Infinity);
+    const bv = b[key] ?? (dir === "desc" ? -Infinity : Infinity);
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return dir === "asc" ? cmp : -cmp;
+  });
+}
+
 export default function BacktestPage() {
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [history, setHistory] = useState<RunSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("created_at");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [form, setForm] = useState({
     strategy_id: "",
     pair: "EURUSD",
@@ -296,14 +318,39 @@ export default function BacktestPage() {
 
         {/* History */}
         <div className="space-y-2 flex-1">
-          <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-            Recent runs
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Recent runs
+            </h2>
+            {history.length > 1 && (
+              <div className="flex items-center gap-1">
+                {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => {
+                  const active = sortKey === k;
+                  return (
+                    <button
+                      key={k}
+                      onClick={() => {
+                        if (active) setSortDir((d) => d === "asc" ? "desc" : "asc");
+                        else { setSortKey(k); setSortDir(k === "created_at" ? "desc" : "desc"); }
+                      }}
+                      className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                        active
+                          ? "bg-blue-700 text-white"
+                          : "text-gray-500 hover:text-gray-300"
+                      }`}
+                    >
+                      {SORT_LABELS[k]}{active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           {history.length === 0 ? (
             <p className="text-sm text-gray-600">No completed backtests yet.</p>
           ) : (
             <div className="space-y-1">
-              {history.map((r) => (
+              {sortRuns(history, sortKey, sortDir).map((r) => (
                 <button
                   key={r.id}
                   onClick={() => setSelectedId(r.id)}
@@ -321,11 +368,15 @@ export default function BacktestPage() {
                       {r.total_pnl >= 0 ? "+" : ""}${fmt(r.total_pnl, 0)}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between mt-1 text-xs text-gray-600">
-                    <span>{r.period_start.slice(0, 10)} → {r.period_end.slice(0, 10)}</span>
-                    <span>Sh {fmt(r.sharpe)} · W {fmtPct(r.win_rate)}</span>
+                  <div className="flex items-center gap-3 mt-1 text-xs">
+                    <span className="text-gray-300">Sh <span className="font-medium">{fmt(r.sharpe)}</span></span>
+                    <span className="text-gray-300">WR <span className="font-medium">{fmtPct(r.win_rate)}</span></span>
+                    <span className="text-gray-300">Tr <span className="font-medium">{r.trade_count ?? "—"}</span></span>
                   </div>
-                  <div className="mt-0.5 text-[10px] text-gray-700">{fmtDate(r.created_at)}</div>
+                  <div className="flex items-center justify-between mt-0.5 text-[10px] text-gray-600">
+                    <span>{r.period_start.slice(0, 10)} → {r.period_end.slice(0, 10)}</span>
+                    <span>{fmtDate(r.created_at)}</span>
+                  </div>
                 </button>
               ))}
             </div>

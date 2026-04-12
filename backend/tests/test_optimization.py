@@ -278,6 +278,12 @@ class TestOptimizationRouter:
             "stop_reason": None,
             "created_at": datetime.datetime(2026, 4, 10, 12, 0, 0, tzinfo=datetime.timezone.utc),
             "user_id": self.user_sub,
+            "initial_strategy_id": self.strategy_id,
+            "system_prompt": "",
+            "user_prompt": "",
+            "time_limit_minutes": 60,
+            "target_sharpe": None,
+            "target_win_rate": None,
         }
 
         # Build a mock connection that acts as an async context manager

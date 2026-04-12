@@ -530,6 +530,12 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
                 {irExpanded ? "Hide IR" : "View IR"}
               </button>
               <Link
+                href={`/optimization?strategy_id=${strategy.id}&pair=${result.pair}&timeframe=${result.timeframe}&period_start=${result.period_start.slice(0, 10)}&period_end=${result.period_end.slice(0, 10)}`}
+                className="rounded border border-blue-700 px-2.5 py-1 text-xs text-blue-400 hover:bg-blue-900/30 transition-colors"
+              >
+                Optimize →
+              </Link>
+              <Link
                 href={`/copilot?strategy_id=${strategy.id}&backtest_id=${id}`}
                 className="rounded bg-accent px-2.5 py-1 text-xs text-white hover:bg-accent/80 transition-colors"
               >
