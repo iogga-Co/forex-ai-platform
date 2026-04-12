@@ -81,7 +81,7 @@ services:
   # ---------------------------------------------------------------------------
   celery:
     build: ./backend
-    command: celery -A core.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A core.celery_app worker --loglevel=info --concurrency=2 -Q celery,optimization
     expose: []
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
