@@ -13,6 +13,7 @@ GET    /api/optimization/runs/{run_id}/iterations — list all iterations
 import asyncio
 import json
 import logging
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
@@ -117,8 +118,8 @@ async def create_run(
             user.sub,
             payload.pair,
             payload.timeframe,
-            payload.period_start,
-            payload.period_end,
+            date.fromisoformat(payload.period_start),
+            date.fromisoformat(payload.period_end),
             str(payload.strategy_id),
             payload.system_prompt,
             payload.user_prompt,
