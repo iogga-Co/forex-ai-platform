@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { fetchWithAuth } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
@@ -151,6 +151,33 @@ export default function OptimizationPage() {
   const [notLoggedIn, setNotLoggedIn] = useState(false);
 
   const esRef = useRef<EventSource | null>(null);
+
+  // Resizable left-panel divider
+  const [splitPx, setSplitPx] = useState(260);
+  const asideRef = useRef<HTMLElement>(null);
+  const dragging = useRef(false);
+
+  const onDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+  }, []);
+
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      if (!dragging.current || !asideRef.current) return;
+      const rect = asideRef.current.getBoundingClientRect();
+      // 49px ≈ header row height; clamp between 80px and (total - 120px for form minimum)
+      const next = Math.max(80, Math.min(rect.height - 120, e.clientY - rect.top - 49));
+      setSplitPx(next);
+    }
+    function onMouseUp() { dragging.current = false; }
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
 
   // Load strategies and runs on mount
   useEffect(() => {
@@ -335,15 +362,15 @@ export default function OptimizationPage() {
       {/* ------------------------------------------------------------------ */}
       {/* Left panel — run list + new run form                                */}
       {/* ------------------------------------------------------------------ */}
-      <aside className="w-80 flex-shrink-0 border-r border-zinc-700 flex flex-col overflow-hidden">
-        <div className="p-4 border-b border-zinc-700">
+      <aside ref={asideRef} className="w-80 flex-shrink-0 border-r border-zinc-700 flex flex-col overflow-hidden">
+        <div className="p-4 border-b border-zinc-700 flex-shrink-0">
           <h2 className="text-sm font-semibold text-zinc-100 uppercase tracking-wide">
             Optimization Runs
           </h2>
         </div>
 
-        {/* Run list */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Run list — height controlled by drag */}
+        <div style={{ height: splitPx }} className="overflow-y-auto flex-shrink-0">
           {runs.length === 0 && (
             <p className="p-4 text-xs text-zinc-500">No runs yet. Create one below.</p>
           )}
@@ -375,8 +402,15 @@ export default function OptimizationPage() {
           ))}
         </div>
 
-        {/* New run form */}
-        <div className="border-t border-zinc-700 p-4 overflow-y-auto max-h-[55vh]">
+        {/* Drag handle */}
+        <div
+          onMouseDown={onDividerMouseDown}
+          className="h-1.5 flex-shrink-0 bg-zinc-700 hover:bg-blue-500 active:bg-blue-400 cursor-row-resize transition-colors"
+          title="Drag to resize"
+        />
+
+        {/* New run form — takes remaining space, scrollable */}
+        <div className="flex-1 overflow-y-auto p-4">
           <h3 className="text-xs font-semibold text-zinc-400 uppercase mb-3">New Run</h3>
           <form onSubmit={handleSubmit} className="space-y-2">
             {/* Strategy */}
