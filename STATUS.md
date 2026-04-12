@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-11 (USDCHF backfill complete; strategy delete/restore UI; Phase 4 unblocked)
+**Last updated:** 2026-04-11 (indicator overlays + oscillator panes + synchronized crosshair on backtest results chart)
 
 ---
 
@@ -386,6 +386,9 @@ Test count: **80 passed** (up from 58 at Phase 1 gate).
 |---|---|
 | #36 | STATUS.md update for 2026-04-10 session ✅ merged |
 | #37 | Strategy delete/restore — trash bin icon, soft-delete, Active/Deleted tab toggle, restore button ✅ merged |
+| #38 | STATUS.md update for 2026-04-11 session ✅ merged |
+| #39 | Silent JWT token refresh — `fetchWithAuth` auto-refreshes expired tokens; no manual re-login required ✅ merged |
+| #40 | Strategy detail page — backtest history table, View IR toggle, "Refine" button → Co-Pilot pre-fill, candlestick chart ✅ merged |
 
 ### Strategy delete/restore design (PR #37)
 
@@ -398,8 +401,56 @@ Test count: **80 passed** (up from 58 at Phase 1 gate).
 
 ---
 
+## Backtest Results Chart — Indicator Overlays (2026-04-11)
+
+PRs #41–#48 added indicator visualisation to the backtest results page.
+
+| PR | Change |
+|---|---|
+| #41 | `GET /api/analytics/backtest/{id}/indicators` endpoint + frontend overlay/oscillator rendering ✅ merged |
+| #42 | Fix: `DATE` columns from asyncpg return `datetime.date` — convert to UTC-aware `datetime` before pandas comparison ✅ merged |
+| #43 | Fix: wrap per-indicator computation in try/except with logging; fix bare f-strings (ruff F541) ✅ merged |
+| #44 | Fix: switch DataFrame index from `pd.DatetimeIndex` to integer Unix timestamps — eliminates tz-aware comparison errors ✅ merged |
+| #45 | Fix: wrap entire DB phase in try/except; surface exception class + message in response body for browser debugging ✅ merged |
+| #46 | Fix: compute 300-hour warmup offset in Python (`timedelta`) instead of SQL `INTERVAL` arithmetic — resolves `UndefinedFunctionError: operator does not exist: timestamp with time zone >= interval` ✅ merged |
+| #47 | Debug: log oscillator count + ref availability in chart effect (diagnostic, now superseded) ✅ merged |
+| #48 | feat: synchronized crosshair across main chart and all oscillator panes ✅ merged |
+
+### Indicator overlay design
+
+**Backend** (`GET /api/analytics/backtest/{run_id}/indicators`):
+- Joins `backtest_runs` → `strategies` to get the strategy IR
+- Fetches 1H OHLCV with 300-bar warmup window (so indicators are fully primed at period start)
+- Parses `entry_conditions` + ATR exit conditions from IR to build a deduplicated `specs` dict
+- Computes all 8 indicators using `engine/indicators.py` functions
+- Returns `{ indicators: [{ id, type, pane, levels?, series: [{name, color, data:[{time,value}]}] }] }`
+- `pane: "overlay"` → EMA, SMA, BB (render on price chart); `pane: "oscillator"` → RSI, MACD, ATR, ADX, STOCH (separate panes)
+
+**Root cause chain** (all fixed):
+1. `pd.DatetimeIndex` comparison TypeError (tz-aware vs tz-naive) → switched to integer Unix timestamps
+2. `DATE` asyncpg return type vs `datetime.datetime` in pandas → `_to_dt()` conversion helper
+3. SQL `INTERVAL` arithmetic in `$2 - INTERVAL '300 hours'` → PostgreSQL can't infer `$2` type, returns interval; fixed by computing `ps_dt - timedelta(hours=300)` in Python
+
+**Frontend** (`backtest/results/[id]/page.tsx`):
+- `Promise.all` fetches candles + indicators in parallel; single React re-render sets both
+- Chart `useEffect` (deps: `[candles, result, indicatorData]`):
+  - Overlay groups: `chart.addLineSeries()` on the main candlestick chart
+  - Oscillator groups: separate `createChart()` per group in `oscContainerRefs` divs below the main chart
+  - Time-scale sync: `subscribeVisibleLogicalRangeChange` with `syncing` guard (pan/zoom synced)
+  - Crosshair sync: `subscribeCrosshairMove` + `setCrosshairPosition(actualValue, time, series)` with `crosshairSyncing` guard — horizontal crosshair snaps to the actual indicator value at each time
+
+### Key lessons (PRs #41–#48)
+- asyncpg `DATE` columns return `datetime.date`, not `datetime.datetime` — must convert before any UTC-aware pandas operation
+- SQL `$N - INTERVAL 'X hours'` fails when PostgreSQL can't infer `$N` type — always compute timestamp arithmetic in Python
+- FastAPI swallows unhandled exceptions as opaque 500s with no body — wrap every code path in try/except with `logger.error(..., exc_info=True)` and return a diagnostic error field in the response for browser-side debugging
+- `pd.DatetimeIndex` with tz-aware asyncpg datetimes causes subtle comparison failures — use integer Unix timestamps as the DataFrame index and compare integers throughout
+- TypeScript callback parameter annotations (e.g. `(d: { indicators: unknown[] })`) override the inferred type of the variable; downstream `setState` calls receive the narrower type, causing type errors
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
+| Remove debug console.log from `page.tsx` | Low | `[chart] oscillators:` log from PR #47 still present — can be cleaned up |
 | Phase 4 — Live Trading | Next | All 6 pairs have full data. Ready to begin. |
