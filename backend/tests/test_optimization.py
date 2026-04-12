@@ -243,25 +243,25 @@ class TestOptimizationRouter:
     """
     Integration-style tests for /api/optimization/* endpoints.
 
-    Uses FastAPI TestClient with the real router but mocks out:
-    - DB pool (asyncpg connection pool)
-    - Celery task dispatch
-    - Redis (for stop-signal)
-    - JWT auth
+    Uses FastAPI TestClient with app.dependency_overrides to bypass JWT auth
+    and inject a mock DB pool.
     """
 
     @pytest.fixture(autouse=True)
     def _setup(self):
         from fastapi.testclient import TestClient
-        from unittest.mock import AsyncMock, patch, MagicMock
+        from unittest.mock import AsyncMock, MagicMock
         import uuid
+        import datetime
+
+        from main import app
+        from core.auth import get_current_user, TokenData
+        from core.db import get_pool
 
         self.run_id = str(uuid.uuid4())
         self.user_sub = "operator"
         self.strategy_id = str(uuid.uuid4())
 
-        # Fake run row returned by DB queries
-        import datetime
         self.fake_run = {
             "id": self.run_id,
             "status": "pending",
@@ -280,39 +280,44 @@ class TestOptimizationRouter:
             "user_id": self.user_sub,
         }
 
-        with (
-            patch("core.auth.get_current_user", return_value=MagicMock(sub=self.user_sub)),
-            patch("core.db.get_pool") as mock_pool_dep,
-        ):
-            mock_conn = AsyncMock()
-            mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-            mock_conn.__aexit__ = AsyncMock(return_value=None)
-            mock_conn.fetchrow = AsyncMock(return_value=self.fake_run)
-            mock_conn.fetch = AsyncMock(return_value=[self.fake_run])
-            mock_conn.fetchval = AsyncMock(return_value=self.user_sub)
+        # Build a mock connection that acts as an async context manager
+        mock_conn = AsyncMock()
+        acquire_ctx = MagicMock()
+        acquire_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        acquire_ctx.__aexit__ = AsyncMock(return_value=False)
 
-            mock_pool = MagicMock()
-            mock_pool.acquire = MagicMock(return_value=mock_conn)
-            mock_pool_dep.return_value = mock_pool
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = acquire_ctx
 
-            from main import app
-            self.client = TestClient(app, raise_server_exceptions=False)
-            self._mock_conn = mock_conn
-            self._mock_pool_dep = mock_pool_dep
-            yield
+        mock_conn.fetchrow = AsyncMock(return_value=self.fake_run)
+        mock_conn.fetch = AsyncMock(return_value=[self.fake_run])
+        mock_conn.fetchval = AsyncMock(return_value=self.user_sub)
+
+        # Override FastAPI dependencies
+        app.dependency_overrides[get_current_user] = lambda: TokenData(sub=self.user_sub)
+        app.dependency_overrides[get_pool] = lambda: mock_pool
+
+        self.client = TestClient(app, raise_server_exceptions=False)
+        self._mock_conn = mock_conn
+
+        yield
+
+        # Restore originals
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_pool, None)
 
     def test_get_runs_returns_list(self):
         resp = self.client.get("/api/optimization/runs")
         assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, list)
+        assert isinstance(resp.json(), list)
 
     def test_get_run_detail(self):
         resp = self.client.get(f"/api/optimization/runs/{self.run_id}")
-        assert resp.status_code in (200, 404)  # 404 if mock not wired for this path
+        assert resp.status_code in (200, 404)
 
     def test_start_already_running_returns_409(self):
+        from unittest.mock import AsyncMock
         running_row = {**self.fake_run, "status": "running"}
-        self._mock_conn.fetchrow = MagicMock(return_value=running_row)
+        self._mock_conn.fetchrow = AsyncMock(return_value=running_row)
         resp = self.client.post(f"/api/optimization/runs/{self.run_id}/start")
         assert resp.status_code == 409
