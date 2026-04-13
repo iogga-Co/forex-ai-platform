@@ -200,14 +200,20 @@ function OptimizationPageInner() {
     };
   }, []);
 
-  // Load strategies and runs on mount
+  // Load strategies and runs on mount; auto-select any currently running run
   useEffect(() => {
     if (!localStorage.getItem("access_token")) {
       setNotLoggedIn(true);
       return;
     }
     loadStrategies();
-    loadRuns();
+    loadRuns().then((fetchedRuns) => {
+      if (!fetchedRuns) return;
+      const running = fetchedRuns.find((r) => r.status === "running");
+      if (running) {
+        selectRun(running);
+      }
+    });
   }, []);
 
   async function loadStrategies() {
@@ -224,14 +230,15 @@ function OptimizationPageInner() {
     }
   }
 
-  async function loadRuns() {
+  async function loadRuns(): Promise<OptRun[] | null> {
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/optimization/runs`);
-      if (!res.ok) return;
-      const data = await res.json();
+      if (!res.ok) return null;
+      const data: OptRun[] = await res.json();
       setRuns(data);
+      return data;
     } catch {
-      // non-fatal
+      return null;
     }
   }
 
@@ -313,6 +320,59 @@ function OptimizationPageInner() {
       esRef.current?.close();
     };
   }, []);
+
+  // Reconnect SSE and refresh status when tab regains visibility
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState !== "visible") return;
+      loadRuns().then((fetchedRuns) => {
+        if (!fetchedRuns) return;
+        // If SSE dropped while backgrounded, reconnect to whichever run is still going
+        setSelectedRun((prev) => {
+          const stillRunning = fetchedRuns.find((r) => r.id === prev?.id && r.status === "running");
+          if (stillRunning && !esRef.current) {
+            startSse(stillRunning.id);
+            loadIterations(stillRunning.id);
+          }
+          // If we had no run selected, auto-pick the running one
+          if (!prev) {
+            const running = fetchedRuns.find((r) => r.status === "running");
+            if (running) {
+              selectRun(running);
+              return running;
+            }
+          }
+          return prev ? (fetchedRuns.find((r) => r.id === prev.id) ?? prev) : prev;
+        });
+      });
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll run status every 15 s while a run is active (catches completion in background)
+  useEffect(() => {
+    if (!selectedRun || selectedRun.status !== "running") return;
+    const id = setInterval(async () => {
+      try {
+        const res = await fetchWithAuth(`${API_BASE}/api/optimization/runs/${selectedRun.id}`);
+        if (!res.ok) return;
+        const updated: OptRun = await res.json();
+        setSelectedRun(updated);
+        // Update the run in the list too
+        setRuns((prev) => prev.map((r) => r.id === updated.id ? updated : r));
+        if (updated.status !== "running") {
+          // Run finished while tab was in background — load final iterations
+          loadIterations(updated.id);
+          esRef.current?.close();
+          esRef.current = null;
+        }
+      } catch {
+        // non-fatal
+      }
+    }, 15_000);
+    return () => clearInterval(id);
+  }, [selectedRun?.id, selectedRun?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

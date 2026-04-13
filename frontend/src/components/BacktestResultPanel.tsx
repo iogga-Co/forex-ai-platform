@@ -525,7 +525,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
             <div className="flex gap-2 shrink-0">
               <button
                 onClick={() => setIrExpanded((v) => !v)}
-                className="rounded border border-gray-600 px-2.5 py-1 text-xs text-gray-400 hover:text-gray-100 transition-colors"
+                className="rounded border border-blue-700 px-2.5 py-1 text-xs text-blue-400 hover:bg-blue-900/30 transition-colors"
               >
                 {irExpanded ? "Hide IR" : "View IR"}
               </button>
@@ -537,7 +537,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
               </Link>
               <Link
                 href={`/copilot?strategy_id=${strategy.id}&backtest_id=${id}`}
-                className="rounded bg-accent px-2.5 py-1 text-xs text-white hover:bg-accent/80 transition-colors"
+                className="rounded border border-blue-700 px-2.5 py-1 text-xs text-blue-400 hover:bg-blue-900/30 transition-colors"
               >
                 Refine →
               </Link>

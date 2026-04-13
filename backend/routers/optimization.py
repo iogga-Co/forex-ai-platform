@@ -229,6 +229,18 @@ async def start_run(
             detail=f"Run is already {row['status']} — cannot start",
         )
 
+    # Mark as running in the DB immediately so any page refresh shows the
+    # correct status — the Celery task will fill in celery_task_id when it starts.
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE optimization_runs
+            SET status = 'running', started_at = NOW()
+            WHERE id = $1
+            """,
+            str(run_id),
+        )
+
     task = run_optimization_task.apply_async(
         args=[str(run_id)],
         queue="optimization",
