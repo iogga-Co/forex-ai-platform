@@ -91,13 +91,13 @@ def _fetch_run(conn: psycopg2.extensions.connection, run_id: str) -> dict | None
 
 
 def _set_run_running(conn: psycopg2.extensions.connection, run_id: str, celery_task_id: str) -> None:
+    """
+    Stamp the Celery task ID once the worker picks up the run.
+    Status is already 'running' — set by the API at enqueue time.
+    """
     with conn.cursor() as cur:
         cur.execute(
-            """
-            UPDATE optimization_runs
-            SET status = 'running', started_at = NOW(), celery_task_id = %s
-            WHERE id = %s
-            """,
+            "UPDATE optimization_runs SET celery_task_id = %s WHERE id = %s",
             (celery_task_id, run_id),
         )
     conn.commit()
