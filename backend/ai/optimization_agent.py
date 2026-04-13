@@ -399,15 +399,24 @@ def analyze_and_mutate(
                 "IR invalid on attempt %d/%d: %s", attempt + 1, MAX_RETRIES, validation_exc
             )
             if attempt < MAX_RETRIES - 1:
-                # Feed error back — append assistant turn then user correction
+                # The Anthropic API requires every tool_use block to be immediately
+                # followed by a user message containing tool_result blocks — a plain
+                # text message is rejected with a 400. Supply proper tool_result blocks
+                # with the error so Claude knows what went wrong.
+                tool_results = [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "is_error": True,
+                        "content": (
+                            f"The tool was applied but the resulting strategy failed "
+                            f"validation: {validation_exc}. Please revise your parameters."
+                        ),
+                    }
+                    for tc in tool_calls
+                ]
                 messages.append({"role": "assistant", "content": response.content})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        f"The changes you proposed produced an invalid strategy: {validation_exc}. "
-                        f"Please correct your tool calls."
-                    ),
-                })
+                messages.append({"role": "user", "content": tool_results})
             else:
                 logger.error(
                     "All %d retry attempts failed validation. Keeping prior IR.", MAX_RETRIES
