@@ -261,7 +261,7 @@ async def stop_run(
             detail=f"Run is {row['status']}, not running",
         )
 
-    r = await aioredis.from_url(settings.redis_url, decode_responses=True)
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
     try:
         await r.set(_STOP_KEY.format(run_id=str(run_id)), "1", ex=3600)
     finally:
@@ -299,9 +299,10 @@ async def stream_run(
     channel = _SSE_CHANNEL.format(run_id=str(run_id))
 
     async def event_generator():
-        r = await aioredis.from_url(settings.redis_url, decode_responses=True)
-        pubsub = r.pubsub()
+        r = None
         try:
+            r = aioredis.from_url(settings.redis_url, decode_responses=True)
+            pubsub = r.pubsub()
             await pubsub.subscribe(channel)
             async for message in pubsub.listen():
                 if message["type"] != "message":
@@ -316,12 +317,18 @@ async def stream_run(
                     logger.warning("SSE parse error for run %s: %s", run_id, exc)
         except asyncio.CancelledError:
             pass
+        except Exception as exc:
+            logger.error(
+                "SSE generator failed for run %s: %s",
+                run_id, exc, exc_info=True,
+            )
+            yield _sse("error", {"run_id": str(run_id), "msg": str(exc)})
         finally:
-            try:
-                await pubsub.unsubscribe(channel)
-            except Exception:
-                pass
-            await r.aclose()
+            if r is not None:
+                try:
+                    await r.aclose()
+                except Exception:
+                    pass
 
     return StreamingResponse(
         event_generator(),
