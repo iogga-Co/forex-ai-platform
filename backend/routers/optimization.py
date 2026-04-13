@@ -304,11 +304,16 @@ async def stream_run(
             r = aioredis.from_url(settings.redis_url, decode_responses=True)
             pubsub = r.pubsub()
             await pubsub.subscribe(channel)
-            async for message in pubsub.listen():
-                if message["type"] != "message":
+            while True:
+                msg = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=20.0
+                )
+                if msg is None:
+                    # Heartbeat keeps nginx / proxies from closing idle connection
+                    yield ": keepalive\n\n"
                     continue
                 try:
-                    data = json.loads(message["data"])
+                    data = json.loads(msg["data"])
                     event = data.get("event", "progress")
                     yield _sse(event, data)
                     if event in ("complete", "error"):
@@ -322,7 +327,10 @@ async def stream_run(
                 "SSE generator failed for run %s: %s",
                 run_id, exc, exc_info=True,
             )
-            yield _sse("error", {"run_id": str(run_id), "msg": str(exc)})
+            try:
+                yield _sse("error", {"run_id": str(run_id), "msg": str(exc)})
+            except Exception:
+                pass
         finally:
             if r is not None:
                 try:
