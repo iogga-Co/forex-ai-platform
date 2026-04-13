@@ -3,6 +3,7 @@
 import { FormEvent, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { fetchWithAuth } from "@/lib/auth";
+import { loadSettings } from "@/lib/settings";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -149,22 +150,26 @@ function OptimizationPageInner() {
   const [selectedRun, setSelectedRun] = useState<OptRun | null>(null);
   const [iterations, setIterations] = useState<Iteration[]>([]);
   const [liveEvents, setLiveEvents] = useState<SseEvent[]>([]);
+
+  const cfg = loadSettings();
   const [form, setForm] = useState({
     strategy_id: searchParams.get("strategy_id") ?? "",
-    pair: searchParams.get("pair") ?? "EURUSD",
-    timeframe: searchParams.get("timeframe") ?? "1H",
-    period_start: searchParams.get("period_start") ?? "2022-01-01",
-    period_end: searchParams.get("period_end") ?? "2024-01-01",
+    pair: searchParams.get("pair") ?? cfg.default_pair,
+    timeframe: searchParams.get("timeframe") ?? cfg.default_timeframe,
+    period_start: searchParams.get("period_start") ?? cfg.default_period_start,
+    period_end: searchParams.get("period_end") ?? cfg.default_period_end,
     system_prompt: "",
     user_prompt: "",
-    max_iterations: "20",
-    time_limit_minutes: "60",
+    max_iterations: String(cfg.default_max_iterations),
+    time_limit_minutes: String(cfg.default_time_limit_minutes),
     target_sharpe: "",
     target_win_rate: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notLoggedIn, setNotLoggedIn] = useState(false);
+  const [sortCol, setSortCol] = useState<"iteration" | "sharpe" | "win_rate" | "max_dd" | "trade_count">("iteration");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const esRef = useRef<EventSource | null>(null);
 
@@ -751,16 +756,37 @@ function OptimizationPageInner() {
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="text-zinc-400 border-b border-zinc-700">
-                          <th className="px-3 py-2 text-center w-12">Iter</th>
-                          <th className="px-3 py-2 text-right">Sharpe</th>
-                          <th className="px-3 py-2 text-right">Win Rate</th>
-                          <th className="px-3 py-2 text-right">Max DD</th>
-                          <th className="px-3 py-2 text-right">Trades</th>
+                          {(["iteration", "sharpe", "win_rate", "max_dd", "trade_count"] as const).map((col) => {
+                            const labels: Record<string, string> = {
+                              iteration: "Iter", sharpe: "Sharpe", win_rate: "Win Rate",
+                              max_dd: "Max DD", trade_count: "Trades",
+                            };
+                            const active = sortCol === col;
+                            return (
+                              <th
+                                key={col}
+                                onClick={() => {
+                                  if (active) setSortDir((d) => d === "asc" ? "desc" : "asc");
+                                  else { setSortCol(col); setSortDir("asc"); }
+                                }}
+                                className={`px-3 py-2 cursor-pointer select-none hover:text-zinc-200 transition-colors ${col === "iteration" ? "text-center w-12" : "text-right"}`}
+                              >
+                                {labels[col]}
+                                <span className="ml-1 inline-block w-2">
+                                  {active ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                                </span>
+                              </th>
+                            );
+                          })}
                           <th className="px-3 py-2 text-left">Changes</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {iterations.map((iter) => (
+                        {[...iterations].sort((a, b) => {
+                          const av = a[sortCol] ?? (sortDir === "asc" ? Infinity : -Infinity);
+                          const bv = b[sortCol] ?? (sortDir === "asc" ? Infinity : -Infinity);
+                          return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
+                        }).map((iter) => (
                           <IterationRow
                             key={iter.iteration}
                             iter={iter}

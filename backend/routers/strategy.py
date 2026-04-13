@@ -149,9 +149,13 @@ async def delete_strategy(
             "UPDATE strategies SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
             strategy_id,
         )
-
-    if result == "UPDATE 0":
-        raise HTTPException(status_code=404, detail="Strategy not found")
+        if result == "UPDATE 0":
+            raise HTTPException(status_code=404, detail="Strategy not found")
+        # Remove all backtest history for this strategy (trades cascade via FK)
+        deleted = await conn.execute(
+            "DELETE FROM backtest_runs WHERE strategy_id = $1", strategy_id
+        )
+        logger.info("Soft-deleted strategy %s, removed %s", strategy_id, deleted)
 
     logger.info("Soft-deleted strategy %s", strategy_id)
 

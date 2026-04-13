@@ -176,7 +176,27 @@ def insert_backtest_run(
             )
             result = cur.fetchone()
 
-    return str(result[0])
+    run_id = str(result[0])
+
+    # Prune oldest runs beyond 50 per strategy (trades cascade via FK)
+    _BACKTEST_CAP = 50
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM backtest_runs
+            WHERE strategy_id = %(strategy_id)s
+              AND id NOT IN (
+                SELECT id FROM backtest_runs
+                WHERE strategy_id = %(strategy_id)s
+                ORDER BY created_at DESC
+                LIMIT %(cap)s
+              )
+            """,
+            {"strategy_id": run["strategy_id"], "cap": _BACKTEST_CAP},
+        )
+    conn.commit()
+
+    return run_id
 
 
 def bulk_insert_trades(

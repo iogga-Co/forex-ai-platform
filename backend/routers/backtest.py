@@ -202,6 +202,22 @@ async def list_backtest_results(
     ]
 
 
+@router.delete("/results/{result_id}", status_code=204)
+async def delete_backtest_result(
+    result_id: UUID,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
+) -> None:
+    """Delete a single backtest run. Trades are removed via ON DELETE CASCADE."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM backtest_runs WHERE id = $1", result_id
+        )
+    if result == "DELETE 0":
+        raise HTTPException(status_code=404, detail="Backtest result not found")
+    logger.info("Deleted backtest run %s", result_id)
+
+
 @router.get("/results/{result_id}")
 async def get_backtest_result(
     result_id: UUID,
