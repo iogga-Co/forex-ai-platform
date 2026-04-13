@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-11 (indicator overlays + oscillator panes + synchronized crosshair on backtest results chart)
+**Last updated:** 2026-04-12 (Optimization tab + Backtest UI overhaul + staging deploy fixes + SSE debugging)
 
 ---
 
@@ -448,9 +448,85 @@ PRs #41–#48 added indicator visualisation to the backtest results page.
 
 ---
 
+---
+
+## Optimization Tab (2026-04-11 → 2026-04-12)
+
+| PR | Change |
+|---|---|
+| #49 | STATUS.md update for 2026-04-11 session ✅ merged |
+| #50 | feat: Optimization tab — AI-driven iterative strategy improvement ✅ merged |
+| #51 | feat: iogga Co logo as browser tab favicon ✅ merged |
+| #52 | fix: parse date strings to `date` objects for asyncpg (optimization 500) ✅ merged |
+| #53 | feat: resizable left-panel divider in Optimization tab ✅ merged |
+
+### Optimization tab design (PR #50)
+
+- **Backend** — `POST /api/optimization/runs` creates a run (status=`pending`); `POST /runs/{id}/start` enqueues a Celery task on the `optimization` queue; `POST /runs/{id}/stop` sets a Redis stop-signal key; `GET /runs/{id}/stream` SSE live progress; `GET /runs/{id}/iterations` full history; `DELETE /runs/{id}` removes run + iterations
+- **Celery task** (`tasks/optimization.py`) — iterative loop: backtest current IR → log iteration → call `ai/optimization_agent.py` (Claude tool-use) → mutate IR → repeat until `max_iterations`, `time_limit_minutes`, or stop signal
+- **AI agent** (`ai/optimization_agent.py`) — Claude claude-sonnet-4-6 with 8 mutation tools (`set_period`, `set_threshold`, `set_operator`, `set_exit_multiplier`, `set_exit_period`, `set_risk_per_trade`); pure `apply_tool_call()` + `build_extra_context()` helpers; no I/O — fully unit-testable
+- **DB schema** — `optimization_runs` + `optimization_iterations` tables (migration `011_optimization.sql`)
+- **Frontend** (`/optimization`) — split panel: left = form + run list, right = live progress chart (Recharts) + iteration detail table
+- **SSE stream** — Redis pub/sub channel `opt:progress:{run_id}` → FastAPI `StreamingResponse` → browser `EventSource`
+- **Tests** — 14 new unit tests covering `apply_tool_call` (10 cases), `build_extra_context` (4 cases), `analyze_and_mutate` (4 mock cases), HTTP router (3 cases)
+
+---
+
+## Backtest UI Overhaul + Production Fixes (2026-04-12)
+
+| PR | Change |
+|---|---|
+| #54 | fix: force-remove conflicting containers before staging compose up ✅ merged |
+| #55 | feat: split-panel backtest UI with inline results, strategy IR and Refine button ✅ merged |
+| #56 | fix: accept JWT as query param on SSE stream endpoint (`?token=`) ✅ merged |
+| #57 | fix: run Next.js in production mode (was running `next dev` in staging) ✅ merged |
+| #58 | fix: disable nginx buffering for SSE stream endpoints ✅ merged |
+| #59 | fix: remove `--reload` from uvicorn in production ✅ merged |
+| #60 | fix: remove erroneous `await` from `aioredis.from_url()` in SSE generator ✅ merged |
+| #61 | feat: backtest history sorting, Optimize button, Resubmit/Delete for optimization runs ✅ merged |
+| #62 | fix: use `--force-recreate` in staging deploy to reliably restart app containers ✅ merged |
+| #63 | fix: harden SSE generator with broad exception handler + logging ✅ merged |
+| #64 | fix: replace `pubsub.listen()` with `get_message()` polling to fix `ERR_INCOMPLETE_CHUNKED_ENCODING` ✅ merged |
+
+### Backtest UI overhaul (PR #55)
+
+- Replaced single-route results page (`/backtest/results/[id]`) with a split-panel layout on `/backtest`
+- Left panel (400 px): run form + sortable history list (sort by Date / Sharpe / Win% / Trades / PnL)
+- History cards show: pair, timeframe, PnL (coloured), Sharpe, Win Rate, Trade Count, date range, run date
+- Right panel: `BacktestResultPanel` component with inline candlestick chart, indicator overlays, equity curve, trade table
+- **Optimize button** — links from backtest detail to `/optimization` with all params pre-filled in the URL (`strategy_id`, `pair`, `timeframe`, `period_start`, `period_end`)
+
+### Optimization run management (PR #61)
+
+- **Resubmit button** — pre-fills the optimization form with all original run parameters (pair, timeframe, dates, prompts, targets)
+- **Delete button** (trash icon) — `DELETE /api/optimization/runs/{id}`; blocked if status is `running`
+- `RunResponse` model extended with 6 fields needed for resubmit: `initial_strategy_id`, `system_prompt`, `user_prompt`, `time_limit_minutes`, `target_sharpe`, `target_win_rate`
+- Optimization page wraps inner component in `<Suspense>` for `useSearchParams` App Router compatibility
+
+### Staging deploy reliability (PR #62)
+
+- **Problem**: `docker rm -f forex-ai-platform-celery-1` (hardcoded names) silently no-oped when actual container names differed; `docker compose up -d` saw existing containers and skipped recreation; Celery worker was running 6-day-old code
+- **Fix**: replaced with `docker compose up -d --remove-orphans --force-recreate fastapi celery nextjs` — always rebuilds named services regardless of name drift
+
+### SSE `ERR_INCOMPLETE_CHUNKED_ENCODING` debugging (PRs #56–#64)
+
+Root cause chain (each PR fixed one layer):
+1. JWT not accepted as query param → browser `EventSource` can't send `Authorization` header → 401 before stream starts (PR #56)
+2. Next.js `next dev` hot-reload was restarting the server mid-stream (PR #57)
+3. Nginx was buffering SSE responses, holding chunks until buffer full (PR #58)
+4. Uvicorn `--reload` was restarting the server mid-stream in staging (PR #59)
+5. `aioredis.from_url()` mistakenly awaited — `TypeError` killed the generator after headers were flushed (PR #60)
+6. Broad `except Exception` added; error SSE event emitted on failure (PR #63)
+7. `pubsub.listen()` nested async generator raises `BaseException` subclasses (`GeneratorExit`) that escape `except Exception`, terminating the chunked response abruptly (PR #64) — **replaced with `get_message(timeout=20.0)` polling + `: keepalive` heartbeats every ~20s**
+
+**Current status**: SSE still not working as of 2026-04-12 end-of-day. PR #64 (polling approach) is deployed and is the most structurally correct fix — needs verification on staging tomorrow.
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Remove debug console.log from `page.tsx` | Low | `[chart] oscillators:` log from PR #47 still present — can be cleaned up |
-| Phase 4 — Live Trading | Next | All 6 pairs have full data. Ready to begin. |
+| Verify SSE fix (PR #64) on staging | High | Start an optimization run; confirm no `ERR_INCOMPLETE_CHUNKED_ENCODING` in browser console |
+| Remove debug `console.log` from `page.tsx` | Low | `[chart] oscillators:` log from PR #47 still present |
+| Phase 4 — Live Trading | Next | All 6 pairs have full data. Optimization tab complete. Ready to begin. |
