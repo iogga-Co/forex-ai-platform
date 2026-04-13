@@ -113,6 +113,7 @@ def _get_client() -> anthropic.AsyncAnthropic:
 
 async def stream_chat(
     messages: list[MessageParam],
+    extra_system_prompt: str = "",
 ) -> AsyncIterator[str]:
     """
     Stream a conversational response from Claude.
@@ -120,13 +121,19 @@ async def stream_chat(
     `messages` is the full conversation history:
         [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
 
+    `extra_system_prompt` is appended to the base system prompt, allowing the
+    user to add custom instructions per session without replacing the core SIR schema.
+
     Yields text deltas as they arrive.
     """
+    system = _SYSTEM_PROMPT
+    if extra_system_prompt.strip():
+        system += f"\n\n## Additional instructions from the user\n{extra_system_prompt.strip()}"
     client = _get_client()
     async with client.messages.stream(
         model="claude-opus-4-6",
         max_tokens=4096,
-        system=_SYSTEM_PROMPT,
+        system=system,
         messages=messages,
     ) as stream:
         async for text in stream.text_stream:

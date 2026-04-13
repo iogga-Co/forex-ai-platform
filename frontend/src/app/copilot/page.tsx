@@ -21,6 +21,15 @@ interface SirProposal {
   metadata?: { description?: string; version?: number };
 }
 
+interface Strategy {
+  id: string;
+  description: string;
+  pair: string;
+  timeframe: string;
+  version: number;
+  ir_json: SirProposal;
+}
+
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 // ---------------------------------------------------------------------------
@@ -206,6 +215,10 @@ export default function CopilotPage() {
   const [streaming, setStreaming] = useState(false);
   const [pendingAssistant, setPendingAssistant] = useState("");
   const [sirProposal, setSirProposal] = useState<SirProposal | null>(null);
+  const [strategies, setStrategies] = useState<Strategy[]>([]);
+  const [loadingStrategy, setLoadingStrategy] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const refineLoadedRef = useRef(false);
 
@@ -213,41 +226,62 @@ export default function CopilotPage() {
   useEffect(() => {
     if (!localStorage.getItem("access_token")) {
       router.push("/login");
+      return;
     }
+    // Load strategy list for the selector
+    fetchWithAuth(`${API_BASE}/api/strategies`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: Strategy[]) => setStrategies(Array.isArray(data) ? data : []))
+      .catch(() => {});
   }, [router]);
 
-  // If opened via Refine button (?strategy_id=&backtest_id=), pre-load context
+  // If opened via Refine button (?strategy_id=...), pre-load context
   useEffect(() => {
     if (refineLoadedRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const strategyId = params.get("strategy_id");
-    const backtestId = params.get("backtest_id");
-    if (!strategyId || !backtestId) return;
+    if (!strategyId) return;
     refineLoadedRef.current = true;
+    loadStrategy(strategyId);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    Promise.all([
-      fetchWithAuth(`/api/strategies/${strategyId}`).then((r) => r.ok ? r.json() : null),
-      fetchWithAuth(`/api/backtest/results/${backtestId}`).then((r) => r.ok ? r.json() : null),
-    ]).then(([strategy, backtest]) => {
-      if (!strategy || !backtest) return;
-      // Pre-load IR into the inspector panel
-      setSirProposal(strategy.ir_json as SirProposal);
-      // Pre-fill chat input with a refinement prompt the user can review then send
-      const m = backtest.metrics;
-      const pct = (v: number | null) =>
-        v !== null && v !== undefined ? (v * 100).toFixed(1) + "%" : "—";
-      setInput(
-        `I want to refine this strategy: "${strategy.description}" (${strategy.pair} ${strategy.timeframe}).\n\n` +
-        `Last backtest (${backtest.period_start.slice(0, 10)} → ${backtest.period_end.slice(0, 10)}):\n` +
-        `- Sharpe: ${m.sharpe?.toFixed(2) ?? "—"}\n` +
-        `- Max Drawdown: ${pct(m.max_dd)}\n` +
-        `- Win Rate: ${pct(m.win_rate)}\n` +
-        `- Trades: ${m.trade_count}\n` +
-        `- Total P&L: $${m.total_pnl?.toFixed(0) ?? "—"}\n\n` +
-        `Please analyse these results and suggest specific improvements to the strategy rules.`
-      );
-    });
-  }, []);
+  function loadStrategy(strategyId: string) {
+    setLoadingStrategy(true);
+    const backtestId = new URLSearchParams(window.location.search).get("backtest_id");
+
+    const strategyReq = fetchWithAuth(`${API_BASE}/api/strategies/${strategyId}`)
+      .then((r) => r.ok ? r.json() : null);
+    const backtestReq = backtestId
+      ? fetchWithAuth(`${API_BASE}/api/backtest/results/${backtestId}`).then((r) => r.ok ? r.json() : null)
+      : Promise.resolve(null);
+
+    Promise.all([strategyReq, backtestReq])
+      .then(([strategy, backtest]) => {
+        if (!strategy) return;
+        setSirProposal(strategy.ir_json as SirProposal);
+        const pct = (v: number | null) =>
+          v !== null && v !== undefined ? (v * 100).toFixed(1) + "%" : "—";
+        if (backtest) {
+          const m = backtest.metrics;
+          setInput(
+            `I want to refine this strategy: "${strategy.description}" (${strategy.pair} ${strategy.timeframe}).\n\n` +
+            `Last backtest (${backtest.period_start.slice(0, 10)} → ${backtest.period_end.slice(0, 10)}):\n` +
+            `- Sharpe: ${m.sharpe?.toFixed(2) ?? "—"}\n` +
+            `- Max Drawdown: ${pct(m.max_dd)}\n` +
+            `- Win Rate: ${pct(m.win_rate)}\n` +
+            `- Trades: ${m.trade_count}\n` +
+            `- Total P&L: $${m.total_pnl?.toFixed(0) ?? "—"}\n\n` +
+            `Please analyse these results and suggest specific improvements to the strategy rules.`
+          );
+        } else {
+          setInput(
+            `I want to refine this strategy: "${strategy.description}" (${strategy.pair} ${strategy.timeframe}).\n\n` +
+            `Please analyse the current rules and suggest improvements.`
+          );
+        }
+      })
+      .finally(() => setLoadingStrategy(false));
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -275,7 +309,7 @@ export default function CopilotPage() {
       const res = await fetchWithAuth(`${API_BASE}/api/copilot/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, message }),
+        body: JSON.stringify({ session_id: sessionId, message, system_prompt: systemPrompt }),
       });
 
       if (!res.ok || !res.body) {
@@ -346,20 +380,68 @@ export default function CopilotPage() {
       {/* ------------------------------------------------------------------ */}
       <div className="flex flex-col flex-1 min-w-0 border-r border-surface-border">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-surface-border shrink-0 flex items-center justify-between">
-          <div>
-            <h1 className="text-base font-semibold text-gray-100">AI Co-Pilot</h1>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Describe your strategy in plain English. I will propose a Strategy IR.
-            </p>
+        <div className="px-5 py-4 border-b border-surface-border shrink-0">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h1 className="text-base font-semibold text-gray-100">AI Co-Pilot</h1>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Describe your strategy in plain English. I will propose a Strategy IR.
+              </p>
+            </div>
+            <button
+              onClick={startNewSession}
+              disabled={streaming}
+              className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-400 hover:text-gray-100 disabled:opacity-40 transition-colors"
+            >
+              New session
+            </button>
           </div>
+          {/* Load existing strategy */}
+          {strategies.length > 0 && (
+            <div className="flex items-center gap-2">
+              <select
+                defaultValue=""
+                disabled={streaming || loadingStrategy}
+                onChange={(e) => {
+                  if (e.target.value) loadStrategy(e.target.value);
+                  e.target.value = "";
+                }}
+                className="flex-1 rounded-md bg-surface border border-surface-border px-3 py-1.5 text-xs text-gray-300 focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+              >
+                <option value="" disabled>Load existing strategy to refine…</option>
+                {strategies.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.description || s.id.slice(0, 8)} ({s.pair} {s.timeframe} v{s.version})
+                  </option>
+                ))}
+              </select>
+              {loadingStrategy && (
+                <span className="text-xs text-gray-500">Loading…</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* System prompt — collapsible */}
+        <div className="border-b border-surface-border shrink-0">
           <button
-            onClick={startNewSession}
-            disabled={streaming}
-            className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-400 hover:text-gray-100 disabled:opacity-40 transition-colors"
+            onClick={() => setSystemPromptOpen((v) => !v)}
+            className="w-full flex items-center justify-between px-5 py-2 text-xs text-gray-500 hover:text-gray-300 transition-colors"
           >
-            New session
+            <span className="font-medium uppercase tracking-wide">System Prompt</span>
+            <span>{systemPromptOpen ? "▲" : "▼"}</span>
           </button>
+          {systemPromptOpen && (
+            <div className="px-5 pb-3">
+              <textarea
+                rows={4}
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                placeholder="Add custom instructions for the AI Co-Pilot (e.g. 'Focus on low-drawdown strategies', 'Always explain your reasoning step by step')…"
+                className="w-full rounded-md bg-surface border border-surface-border px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-accent resize-none"
+              />
+            </div>
+          )}
         </div>
 
         {/* Message list */}
