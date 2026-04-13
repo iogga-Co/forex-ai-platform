@@ -48,6 +48,7 @@ class ChatRequest(BaseModel):
     session_id: UUID
     message: str
     strategy_id: UUID | None = None  # strategy currently open in the inspector
+    system_prompt: str = ""          # optional extra instructions appended to base system prompt
 
 
 class TurnResponse(BaseModel):
@@ -180,7 +181,7 @@ async def chat(
 
             # 5. Stream Claude's response
             full_response: list[str] = []
-            async for chunk in stream_chat(messages):
+            async for chunk in stream_chat(messages, extra_system_prompt=payload.system_prompt):
                 full_response.append(chunk)
                 yield _sse("text", json.dumps(chunk))
 

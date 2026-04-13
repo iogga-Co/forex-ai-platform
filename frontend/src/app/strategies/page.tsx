@@ -125,7 +125,7 @@ function StrategyCard({
           Backtest
         </Link>
         <Link
-          href={`/optimization?strategy_id=${s.id}&pair=${s.pair}&timeframe=${s.timeframe}`}
+          href={`/copilot?strategy_id=${s.id}&pair=${s.pair}&timeframe=${s.timeframe}`}
           onClick={(e) => e.stopPropagation()}
           className="rounded-md border border-blue-700 px-3 py-1.5 text-xs text-blue-400 hover:bg-blue-900/30 transition-colors"
         >
