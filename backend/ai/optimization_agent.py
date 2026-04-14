@@ -381,16 +381,19 @@ def analyze_and_mutate(
             # Still valid — no changes this iteration
             return current_ir, ai_analysis, "no changes"
 
-        # Apply all tool calls sequentially
+        # Apply all tool calls sequentially, then validate (Layer 2)
+        # Both apply and validation are inside the same try/except so a bad
+        # tool input (e.g. missing condition_index) triggers a retry instead
+        # of crashing the entire optimization run.
         candidate_ir = current_ir
         change_descriptions: list[str] = []
-        for tc in tool_calls:
-            candidate_ir = apply_tool_call(candidate_ir, tc.name, tc.input)  # type: ignore[arg-type]
-            change_descriptions.append(f"{tc.name}({tc.input})")
-        ai_changes = "; ".join(change_descriptions)
-
-        # Validate with Pydantic (Layer 2)
+        ai_changes = "no changes"
         try:
+            for tc in tool_calls:
+                candidate_ir = apply_tool_call(candidate_ir, tc.name, tc.input)  # type: ignore[arg-type]
+                change_descriptions.append(f"{tc.name}({tc.input})")
+            ai_changes = "; ".join(change_descriptions)
+
             StrategyIR.model_validate(candidate_ir)
             logger.info("Iteration IR valid after %d attempt(s). Changes: %s", attempt + 1, ai_changes)
             return candidate_ir, ai_analysis, ai_changes
