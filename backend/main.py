@@ -11,7 +11,7 @@ from core import db as core_db
 from core.config import settings
 from core.redis_bridge import subscribe_and_forward
 from core.websocket import manager
-from routers import analytics, auth, backtest, copilot, health, optimization, strategy, trading, ws
+from routers import analytics, auth, backtest, candles, copilot, health, optimization, strategy, trading, ws
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,7 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(backtest.router)
+app.include_router(candles.router)
 app.include_router(analytics.router)
 app.include_router(strategy.router)
 app.include_router(copilot.router)

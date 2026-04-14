@@ -5,12 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const NAV_ITEMS = [
-  { href: "/dashboard",   label: "Dashboard",   phase: null },
-  { href: "/backtest",    label: "Backtest",     phase: 1 },
-  { href: "/strategies",  label: "Strategies",   phase: 2 },
-  { href: "/copilot",      label: "AI Co-Pilot",   phase: 2 },
-  { href: "/optimization", label: "Optimize",      phase: 3 },
-  { href: "/live",         label: "Live Trading",  phase: 4 },
+  { href: "/dashboard",    label: "Dashboard",    phase: null },
+  { href: "/superchart",   label: "Superchart",   phase: null },
+  { href: "/backtest",     label: "Backtest",     phase: 1 },
+  { href: "/strategies",   label: "Strategies",   phase: 2 },
+  { href: "/copilot",      label: "AI Co-Pilot",  phase: 2 },
+  { href: "/optimization", label: "Optimize",     phase: 3 },
+  { href: "/live",         label: "Live Trading", phase: 4 },
 ] as const;
 
 export default function Sidebar() {
