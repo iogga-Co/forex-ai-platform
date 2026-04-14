@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   createChart,
   CrosshairMode,
@@ -138,7 +138,16 @@ function makeChart(container: HTMLDivElement, height: number, hideTimeScale = fa
 // Main page component
 // ---------------------------------------------------------------------------
 export default function SuperchartPage() {
+  return (
+    <Suspense>
+      <SuperchartPageInner />
+    </Suspense>
+  );
+}
+
+function SuperchartPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // --- data controls ---
   const [pair, setPair] = useState("EURUSD");
@@ -172,7 +181,8 @@ export default function SuperchartPage() {
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const overlaySeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const subSeriesRef = useRef<ISeriesApi<"Line" | "Histogram">[]>([]);
-  const syncingRef = useRef(false); // prevent feedback loops during scroll sync
+  const syncingRef = useRef(false);          // prevent feedback loops during scroll sync
+  const crosshairSyncRef = useRef(false);    // prevent feedback loops during crosshair sync
 
   // ---------------------------------------------------------------------------
   // Chart initialisation (once on mount)
@@ -210,6 +220,29 @@ export default function SuperchartPage() {
       syncingRef.current = false;
     });
 
+    // Synchronise crosshair between the two charts
+    main.subscribeCrosshairMove((param) => {
+      if (crosshairSyncRef.current) return;
+      crosshairSyncRef.current = true;
+      const subSeries = subSeriesRef.current[0];
+      if (!param.time || !subSeries) {
+        sub.clearCrosshairPosition();
+      } else {
+        sub.setCrosshairPosition(NaN, param.time, subSeries);
+      }
+      crosshairSyncRef.current = false;
+    });
+    sub.subscribeCrosshairMove((param) => {
+      if (crosshairSyncRef.current) return;
+      crosshairSyncRef.current = true;
+      if (!param.time || !cSeries) {
+        main.clearCrosshairPosition();
+      } else {
+        main.setCrosshairPosition(NaN, param.time, cSeries);
+      }
+      crosshairSyncRef.current = false;
+    });
+
     // Resize observer
     const ro = new ResizeObserver(() => {
       if (mainDivRef.current) main.applyOptions({ width: mainDivRef.current.clientWidth });
@@ -236,7 +269,11 @@ export default function SuperchartPage() {
       .then((r) => r.json())
       .then((data: Strategy[]) => {
         setStrategies(data);
-        if (data.length > 0) setSelectedStratId(data[0].id);
+        const urlStratId = searchParams.get("strategy_id");
+        const initial = urlStratId && data.find((s) => s.id === urlStratId)
+          ? urlStratId
+          : data.length > 0 ? data[0].id : "";
+        setSelectedStratId(initial);
       })
       .catch(() => {});
   }, []);

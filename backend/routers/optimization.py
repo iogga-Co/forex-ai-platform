@@ -383,7 +383,7 @@ async def list_iterations(
         rows = await conn.fetch(
             """
             SELECT iteration_number, sharpe, win_rate, max_dd, total_pnl,
-                   trade_count, ai_analysis, ai_changes, created_at
+                   trade_count, ai_analysis, ai_changes, created_at, strategy_ir
             FROM optimization_iterations
             WHERE run_id = $1
             ORDER BY iteration_number
@@ -402,6 +402,7 @@ async def list_iterations(
             "ai_analysis": r["ai_analysis"],
             "ai_changes": r["ai_changes"],
             "created_at": r["created_at"].isoformat(),
+            "strategy_ir": r["strategy_ir"],
         }
         for r in rows
     ]

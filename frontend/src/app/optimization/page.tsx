@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { fetchWithAuth } from "@/lib/auth";
 import { loadSettings } from "@/lib/settings";
 
@@ -49,6 +49,7 @@ interface Iteration {
   ai_analysis: string | null;
   ai_changes: string | null;
   created_at: string;
+  strategy_ir?: Record<string, unknown> | null;
 }
 
 interface SseEvent {
@@ -102,33 +103,39 @@ function statusColor(status: string): string {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function IterationRow({ iter, isBest }: { iter: Iteration; isBest: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+function IterationRow({
+  iter,
+  isBest,
+  isSelected,
+  onSelect,
+}: {
+  iter: Iteration;
+  isBest: boolean;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
   return (
-    <>
-      <tr
-        className={`border-b border-zinc-700 cursor-pointer hover:bg-zinc-700/40 ${isBest ? "bg-green-900/20" : ""}`}
-        onClick={() => setExpanded((x) => !x)}
-      >
-        <td className="px-3 py-2 text-center">
-          {iter.iteration}{isBest && <span className="ml-1 text-green-400 text-xs">★</span>}
-        </td>
-        <td className="px-3 py-2 text-right">{fmt(iter.sharpe)}</td>
-        <td className="px-3 py-2 text-right">{fmtPct(iter.win_rate)}</td>
-        <td className="px-3 py-2 text-right">{fmtPct(iter.max_dd)}</td>
-        <td className="px-3 py-2 text-right">{iter.trade_count ?? "—"}</td>
-        <td className="px-3 py-2 text-zinc-400 text-xs truncate max-w-xs">{iter.ai_changes ?? "—"}</td>
-      </tr>
-      {expanded && (
-        <tr className="bg-zinc-800/60">
-          <td colSpan={6} className="px-4 py-3 text-sm text-zinc-300 whitespace-pre-wrap">
-            <strong className="text-zinc-100">AI Analysis:</strong>
-            <br />
-            {iter.ai_analysis || "(no analysis)"}
-          </td>
-        </tr>
-      )}
-    </>
+    <tr
+      className={[
+        "border-b border-zinc-700 cursor-pointer transition-colors",
+        isSelected
+          ? "bg-blue-900/40 hover:bg-blue-900/50"
+          : isBest
+          ? "bg-green-900/20 hover:bg-zinc-700/40"
+          : "hover:bg-zinc-700/40",
+      ].join(" ")}
+      onClick={onSelect}
+    >
+      <td className="px-3 py-2 text-center">
+        {iter.iteration}
+        {isBest && <span className="ml-1 text-green-400 text-xs">★</span>}
+      </td>
+      <td className="px-3 py-2 text-right">{fmt(iter.sharpe)}</td>
+      <td className="px-3 py-2 text-right">{fmtPct(iter.win_rate)}</td>
+      <td className="px-3 py-2 text-right">{fmtPct(iter.max_dd)}</td>
+      <td className="px-3 py-2 text-right">{iter.trade_count ?? "—"}</td>
+      <td className="px-3 py-2 text-zinc-400 text-xs truncate max-w-xs">{iter.ai_changes ?? "—"}</td>
+    </tr>
   );
 }
 
@@ -145,11 +152,15 @@ export default function OptimizationPage() {
 
 function OptimizationPageInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [runs, setRuns] = useState<OptRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<OptRun | null>(null);
   const [iterations, setIterations] = useState<Iteration[]>([]);
   const [liveEvents, setLiveEvents] = useState<SseEvent[]>([]);
+  const [selectedIter, setSelectedIter] = useState<Iteration | null>(null);
+  const [iterActionBusy, setIterActionBusy] = useState(false);
+  const [iterActionError, setIterActionError] = useState<string | null>(null);
 
   const cfg = loadSettings();
   const [form, setForm] = useState({
@@ -257,6 +268,8 @@ function OptimizationPageInner() {
     setSelectedRun(run);
     setIterations([]);
     setLiveEvents([]);
+    setSelectedIter(null);
+    setIterActionError(null);
     loadIterations(run.id);
 
     // Close any existing SSE connection
@@ -463,11 +476,62 @@ function OptimizationPageInner() {
         setSelectedRun(null);
         setIterations([]);
         setLiveEvents([]);
+        setSelectedIter(null);
         esRef.current?.close();
         esRef.current = null;
       }
     } catch {
       // non-fatal
+    }
+  }
+
+  async function saveIterAndNavigate(destination: "optimize" | "refine" | "copilot" | "superchart") {
+    if (!selectedIter || !selectedRun) return;
+    setIterActionBusy(true);
+    setIterActionError(null);
+    try {
+      // strategy_ir may come back as a parsed object or a JSON string depending on asyncpg version
+      const rawIr = selectedIter.strategy_ir;
+      if (!rawIr) throw new Error("No strategy IR stored for this iteration");
+      const ir: Record<string, unknown> =
+        typeof rawIr === "string" ? JSON.parse(rawIr) : (rawIr as Record<string, unknown>);
+      const meta = (ir.metadata as Record<string, unknown> | undefined) ?? {};
+      const pair = (meta.pair as string | undefined) ?? selectedRun.pair;
+      const timeframe = (meta.timeframe as string | undefined) ?? selectedRun.timeframe;
+      const label = `[Opt iter ${selectedIter.iteration}] ${selectedRun.pair} ${selectedRun.timeframe}`;
+
+      const res = await fetchWithAuth(`${API_BASE}/api/strategies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ir_json: ir,
+          description: label,
+          pair,
+          timeframe,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
+      }
+      const saved = await res.json();
+      const sid = saved.id;
+
+      if (destination === "optimize") {
+        router.push(
+          `/optimization?strategy_id=${sid}&pair=${encodeURIComponent(selectedRun.pair)}&timeframe=${encodeURIComponent(selectedRun.timeframe)}&period_start=${encodeURIComponent(selectedRun.period_start)}&period_end=${encodeURIComponent(selectedRun.period_end)}`,
+        );
+      } else if (destination === "refine") {
+        router.push(`/copilot?strategy_id=${sid}&refine=1`);
+      } else if (destination === "copilot") {
+        router.push(`/copilot?strategy_id=${sid}`);
+      } else {
+        router.push(`/superchart?strategy_id=${sid}`);
+      }
+    } catch (err: unknown) {
+      setIterActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIterActionBusy(false);
     }
   }
 
@@ -803,9 +867,45 @@ function OptimizationPageInner() {
 
                 {/* Iterations table */}
                 <div className="px-6 py-4">
-                  <h2 className="text-xs font-semibold text-zinc-400 uppercase mb-3">
-                    Iteration History
-                  </h2>
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-xs font-semibold text-zinc-400 uppercase">
+                      Iteration History
+                    </h2>
+                    <div className="flex items-center gap-2">
+                      {selectedIter && (
+                        <span className="text-xs text-zinc-500">
+                          Iter {selectedIter.iteration} selected —
+                        </span>
+                      )}
+                      <button
+                        disabled={!selectedIter || iterActionBusy}
+                        onClick={() => saveIterAndNavigate("optimize")}
+                        className="rounded-md border border-blue-700 px-3 py-1.5 text-xs text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Optimize
+                      </button>
+                      <button
+                        disabled={!selectedIter || iterActionBusy}
+                        onClick={() => saveIterAndNavigate("refine")}
+                        className="rounded-md border border-blue-700 px-3 py-1.5 text-xs text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Refine
+                      </button>
+                      <button
+                        disabled={!selectedIter || iterActionBusy}
+                        onClick={() => saveIterAndNavigate("superchart")}
+                        className="rounded-md border border-blue-700 px-3 py-1.5 text-xs text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Superchart
+                      </button>
+                      {iterActionBusy && (
+                        <span className="text-xs text-zinc-400 animate-pulse">Saving…</span>
+                      )}
+                    </div>
+                  </div>
+                  {iterActionError && (
+                    <p className="text-xs text-red-400 mt-1">{iterActionError}</p>
+                  )}
                   {iterations.length === 0 ? (
                     <p className="text-xs text-zinc-500">
                       {selectedRun.status === "running"
@@ -851,6 +951,13 @@ function OptimizationPageInner() {
                             key={iter.iteration}
                             iter={iter}
                             isBest={iter.iteration === selectedRun.best_iteration}
+                            isSelected={selectedIter?.iteration === iter.iteration}
+                            onSelect={() => {
+                              setSelectedIter((prev) =>
+                                prev?.iteration === iter.iteration ? null : iter
+                              );
+                              setIterActionError(null);
+                            }}
                           />
                         ))}
                       </tbody>
@@ -859,18 +966,22 @@ function OptimizationPageInner() {
                 </div>
               </div>
 
-              {/* Right panel — latest AI analysis */}
+              {/* Right panel — AI analysis + best strategy */}
               {iterations.length > 0 && (
-                <aside className="w-80 flex-shrink-0 border-l border-zinc-700 overflow-y-auto p-4">
-                  <h3 className="text-xs font-semibold text-zinc-400 uppercase mb-2">
-                    Latest AI Analysis (iter {iterations[iterations.length - 1].iteration})
-                  </h3>
-                  <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed">
-                    {iterations[iterations.length - 1].ai_analysis || "(none)"}
-                  </p>
+                <aside className="w-72 flex-shrink-0 border-l border-zinc-700 overflow-y-auto p-4 space-y-4">
+                  <div>
+                    <h3 className="text-xs font-semibold text-zinc-400 uppercase mb-2">
+                      {selectedIter
+                        ? `AI Analysis (iter ${selectedIter.iteration})`
+                        : `Latest AI Analysis (iter ${iterations[iterations.length - 1].iteration})`}
+                    </h3>
+                    <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed">
+                      {(selectedIter ?? iterations[iterations.length - 1]).ai_analysis || "(none)"}
+                    </p>
+                  </div>
 
                   {selectedRun.best_strategy_id && (
-                    <div className="mt-6 p-3 bg-green-900/20 border border-green-700/40 rounded">
+                    <div className="p-3 bg-green-900/20 border border-green-700/40 rounded">
                       <p className="text-xs font-semibold text-green-300 mb-1">
                         Best Strategy Saved
                       </p>
