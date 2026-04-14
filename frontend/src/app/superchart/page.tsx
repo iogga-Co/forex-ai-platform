@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   createChart,
@@ -138,6 +138,14 @@ function makeChart(container: HTMLDivElement, height: number, hideTimeScale = fa
 // Main page component
 // ---------------------------------------------------------------------------
 export default function SuperchartPage() {
+  return (
+    <Suspense>
+      <SuperchartPageInner />
+    </Suspense>
+  );
+}
+
+function SuperchartPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
