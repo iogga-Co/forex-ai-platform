@@ -20,6 +20,14 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import {
+  conditionToLabel,
+  exitConditionToLabel,
+  filterToLabels,
+  type EntryCondition,
+  type ExitCondition,
+} from "@/lib/strategyLabels";
+import { computeHealthBadges } from "@/lib/strategyHealth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -85,13 +93,24 @@ interface IndicatorGroup {
   series: IndicatorSeries[];
 }
 
+interface StrategyIrShape {
+  entry_conditions?: EntryCondition[];
+  exit_conditions?: {
+    stop_loss?:   ExitCondition;
+    take_profit?: ExitCondition;
+  };
+  filters?: { exclude_days?: string[]; session?: string };
+  position_sizing?: { risk_per_trade_pct?: number; max_size_units?: number };
+  metadata?: { description?: string };
+}
+
 interface Strategy {
   id: string;
   version: number;
   description: string;
   pair: string;
   timeframe: string;
-  ir_json: Record<string, unknown>;
+  ir_json: StrategyIrShape;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +142,10 @@ function fmtDateTime(iso: string): string {
   });
 }
 
+function tradeDurationMin(t: Trade): number {
+  return (new Date(t.exit_time).getTime() - new Date(t.entry_time).getTime()) / 60000;
+}
+
 // ---------------------------------------------------------------------------
 // MetricCard
 // ---------------------------------------------------------------------------
@@ -132,6 +155,17 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
       <p className="text-xs text-gray-400">{label}</p>
       <p className="text-xl font-semibold text-gray-100 mt-0.5">{value}</p>
       {sub && <p className="text-xs text-gray-500 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ConditionCard
+// ---------------------------------------------------------------------------
+function ConditionCard({ text }: { text: string }) {
+  return (
+    <div className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs text-slate-200 leading-snug">
+      {text}
     </div>
   );
 }
@@ -160,6 +194,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
   const [tradeFilter, setTradeFilter] = useState<"all" | "long" | "short" | "win" | "loss">("all");
   const [sortCol, setSortCol] = useState<keyof Trade>("entry_time");
   const [sortAsc, setSortAsc] = useState(true);
+  const [irView, setIrView] = useState<"story" | "json">("story");
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const oscContainerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -178,6 +213,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
     setStrategy(null);
     setError(null);
     setTradeFilter("all");
+    setIrView("story");
 
     Promise.all([
       fetchWithAuth(`/api/backtest/results/${id}`)
@@ -205,14 +241,9 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
         );
         setIndicatorData(indData.indicators ?? []);
 
-        // Fetch strategy info
         fetchWithAuth(`/api/strategies/${res.strategy_id}`)
           .then((r) => r.ok ? r.json() : null)
-          .then((s: Strategy | null) => {
-            if (s) {
-              setStrategy(s);
-            }
-          })
+          .then((s: Strategy | null) => { if (s) setStrategy(s); })
           .catch(() => {});
       })
       .catch((err) => setError(err.message))
@@ -441,11 +472,33 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
 
   const m = result.metrics;
 
+  // --- Compute profit factor + trade durations for health badges ---
+  const winnerTrades = result.trades.filter((t) => t.pnl > 0);
+  const loserTrades  = result.trades.filter((t) => t.pnl < 0);
+  const grossProfit  = winnerTrades.reduce((s, t) => s + t.pnl, 0);
+  const grossLoss    = Math.abs(loserTrades.reduce((s, t) => s + t.pnl, 0));
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : null;
+  const avgWinDuration  = winnerTrades.length > 0
+    ? winnerTrades.reduce((s, t) => s + tradeDurationMin(t), 0) / winnerTrades.length
+    : null;
+  const avgLossDuration = loserTrades.length > 0
+    ? loserTrades.reduce((s, t) => s + tradeDurationMin(t), 0) / loserTrades.length
+    : null;
+
+  const healthBadges = computeHealthBadges(m, profitFactor, avgWinDuration, avgLossDuration);
+
+  const badgeColours: Record<string, string> = {
+    positive: "text-emerald-400 border-emerald-800 bg-emerald-900/20",
+    neutral:  "text-yellow-400 border-yellow-800 bg-yellow-900/20",
+    negative: "text-red-400 border-red-800 bg-red-900/20",
+  };
+
+  // --- Trade filtering + sorting ---
   const filtered = result.trades.filter((t) => {
-    if (tradeFilter === "long") return t.direction === "long";
+    if (tradeFilter === "long")  return t.direction === "long";
     if (tradeFilter === "short") return t.direction === "short";
-    if (tradeFilter === "win") return t.pnl > 0;
-    if (tradeFilter === "loss") return t.pnl <= 0;
+    if (tradeFilter === "win")   return t.pnl > 0;
+    if (tradeFilter === "loss")  return t.pnl <= 0;
     return true;
   });
 
@@ -506,22 +559,14 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
 
       {/* Strategy info + indicator parameters */}
       {strategy && (() => {
-        const ir = strategy.ir_json as {
-          entry_conditions?: Array<{
-            indicator: string; period?: number; operator: string; value?: number | null;
-            component?: string | null; fast?: number | null; slow?: number | null;
-            signal_period?: number | null; std_dev?: number | null;
-            k_smooth?: number | null; d_period?: number | null;
-          }>;
-          exit_conditions?: {
-            stop_loss?: { type: string; period?: number | null; multiplier?: number | null; pips?: number | null; percent?: number | null };
-            take_profit?: { type: string; period?: number | null; multiplier?: number | null; pips?: number | null; percent?: number | null };
-          };
-          filters?: { exclude_days?: string[]; session?: string };
-          position_sizing?: { risk_per_trade_pct?: number; max_size_units?: number };
-        };
+        const ir = strategy.ir_json;
+        const sl = ir.exit_conditions?.stop_loss;
+        const tp = ir.exit_conditions?.take_profit;
+        const filters = ir.filters;
+        const sizing = ir.position_sizing;
 
-        function stopLabel(s: { type: string; period?: number | null; multiplier?: number | null; pips?: number | null; percent?: number | null } | undefined) {
+        // Legacy chip helpers (used in JSON view)
+        function stopLabel(s: ExitCondition | undefined): string {
           if (!s) return "—";
           if (s.type === "atr") return `ATR(${s.period}) × ${s.multiplier}`;
           if (s.type === "fixed_pips") return `${s.pips} pips`;
@@ -531,17 +576,13 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
 
         type Cond = NonNullable<typeof ir.entry_conditions>[number];
 
-        // Emit every numeric/string parameter that is actually set in the IR
         function condParams(c: Cond): Array<{ key: string; val: string | number }> {
           const out: Array<{ key: string; val: string | number }> = [];
           const add = (k: string, v: string | number | null | undefined) => {
             if (v != null) out.push({ key: k, val: v });
           };
-          // MACD uses fast/slow/signal_period instead of period
           if (c.indicator === "MACD") {
-            add("fast", c.fast);
-            add("slow", c.slow);
-            add("sig", c.signal_period);
+            add("fast", c.fast); add("slow", c.slow); add("sig", c.signal_period);
           } else {
             add("period", c.period);
           }
@@ -559,12 +600,6 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
           return c.operator;
         }
 
-        const filters = ir.filters;
-        const sizing = ir.position_sizing;
-        const sl = ir.exit_conditions?.stop_loss;
-        const tp = ir.exit_conditions?.take_profit;
-
-        // Compact label=value chip
         const Chip = ({ label, value }: { label: string; value: string | number }) => (
           <span className="inline-flex items-center gap-0.5 rounded bg-gray-700/70 px-1.5 py-0.5 text-[10px] font-mono leading-none">
             <span className="text-gray-500">{label}=</span>
@@ -572,60 +607,116 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
           </span>
         );
 
+        const n = ir.entry_conditions?.length ?? 0;
+        const cols = n <= 2 ? "grid-cols-1" : n <= 4 ? "grid-cols-2" : "grid-cols-3";
+
         return (
           <div className="bg-gray-800 rounded-lg px-3 py-2.5 space-y-2">
-            {/* Header row */}
-            <div className="flex items-baseline justify-between gap-3">
+
+            {/* Header row + Story/JSON toggle */}
+            <div className="flex items-center justify-between gap-3">
               <p className="text-xs font-medium text-gray-200 truncate">{strategy.description}</p>
-              <p className="text-[10px] text-gray-500 shrink-0 font-mono">
-                {strategy.pair} · {strategy.timeframe} · v{strategy.version}
-              </p>
-            </div>
-
-            {/* Entry conditions — auto-column grid based on count */}
-            {ir.entry_conditions && ir.entry_conditions.length > 0 && (() => {
-              const n = ir.entry_conditions!.length;
-              const cols = n <= 2 ? "grid-cols-1" : n <= 4 ? "grid-cols-2" : "grid-cols-3";
-              return (
-                <div className={`grid ${cols} gap-x-4 gap-y-1`}>
-                  {ir.entry_conditions!.map((c, i) => {
-                    const params = condParams(c);
-                    return (
-                      <div key={i} className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] font-semibold text-blue-400 font-mono w-10 shrink-0">{c.indicator}</span>
-                        {params.map(({ key, val }) => <Chip key={key} label={key} value={val} />)}
-                        <span className="text-[10px] text-gray-600 italic">{condComparison(c)}</span>
-                      </div>
-                    );
-                  })}
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="flex text-[10px]">
+                  {(["story", "json"] as const).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setIrView(v)}
+                      className={`px-2 py-0.5 capitalize transition-colors ${
+                        irView === v
+                          ? "text-blue-400 border-b border-blue-500"
+                          : "text-slate-500 hover:text-slate-300"
+                      }`}
+                    >
+                      {v}
+                    </button>
+                  ))}
                 </div>
-              );
-            })()}
-
-            {/* Exit + sizing + filters — single dense row */}
-            <div className="flex items-center gap-1.5 flex-wrap border-t border-gray-700/60 pt-1.5">
-              {sl && (
-                <><span className="text-[10px] text-gray-500 mr-0.5">SL</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(sl)}</span></>
-              )}
-              {tp && (
-                <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">TP</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(tp)}</span></>
-              )}
-              {sizing?.risk_per_trade_pct != null && (
-                <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">risk</span><span className="text-[10px] font-mono text-gray-300">{sizing.risk_per_trade_pct}%</span></>
-              )}
-              {sizing?.max_size_units != null && (
-                <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">size</span><span className="text-[10px] font-mono text-gray-300">{sizing.max_size_units.toLocaleString()}</span></>
-              )}
-              {filters?.session && filters.session !== "all" && (
-                <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">session</span><span className="text-[10px] font-mono text-gray-300">{filters.session}</span></>
-              )}
-              {filters?.exclude_days && filters.exclude_days.length > 0 && (
-                <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">excl</span><span className="text-[10px] font-mono text-gray-300">{filters.exclude_days.map(d => d.slice(0, 3)).join(",")}</span></>
-              )}
+                <p className="text-[10px] text-gray-500 font-mono">
+                  {strategy.pair} · {strategy.timeframe} · v{strategy.version}
+                </p>
+              </div>
             </div>
+
+            {/* Entry conditions */}
+            {ir.entry_conditions && ir.entry_conditions.length > 0 && (
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1.5">Entry</p>
+                {irView === "story" ? (
+                  <div className={`grid ${cols} gap-2`}>
+                    {ir.entry_conditions.map((c, i) => (
+                      <ConditionCard key={i} text={conditionToLabel(c)} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className={`grid ${cols} gap-x-4 gap-y-1`}>
+                    {ir.entry_conditions.map((c, i) => {
+                      const params = condParams(c);
+                      return (
+                        <div key={i} className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-semibold text-blue-400 font-mono w-10 shrink-0">{c.indicator}</span>
+                          {params.map(({ key, val }) => <Chip key={key} label={key} value={val} />)}
+                          <span className="text-[10px] text-gray-600 italic">{condComparison(c)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Exit + filters row */}
+            {irView === "story" ? (
+              <div className="flex flex-wrap gap-2 border-t border-gray-700/60 pt-1.5">
+                {sl && <ConditionCard text={exitConditionToLabel("Stop Loss", sl)} />}
+                {tp && <ConditionCard text={exitConditionToLabel("Take Profit", tp)} />}
+                {filters && filterToLabels(filters).map((lbl, i) => (
+                  <ConditionCard key={i} text={lbl} />
+                ))}
+                {sizing?.risk_per_trade_pct != null && (
+                  <ConditionCard text={`Risk per trade: ${sizing.risk_per_trade_pct}%`} />
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 flex-wrap border-t border-gray-700/60 pt-1.5">
+                {sl && (
+                  <><span className="text-[10px] text-gray-500 mr-0.5">SL</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(sl)}</span></>
+                )}
+                {tp && (
+                  <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">TP</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(tp)}</span></>
+                )}
+                {sizing?.risk_per_trade_pct != null && (
+                  <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">risk</span><span className="text-[10px] font-mono text-gray-300">{sizing.risk_per_trade_pct}%</span></>
+                )}
+                {sizing?.max_size_units != null && (
+                  <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">size</span><span className="text-[10px] font-mono text-gray-300">{sizing.max_size_units.toLocaleString()}</span></>
+                )}
+                {filters?.session && filters.session !== "all" && (
+                  <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">session</span><span className="text-[10px] font-mono text-gray-300">{filters.session}</span></>
+                )}
+                {filters?.exclude_days && filters.exclude_days.length > 0 && (
+                  <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">excl</span><span className="text-[10px] font-mono text-gray-300">{filters.exclude_days.map(d => d.slice(0, 3)).join(",")}</span></>
+                )}
+              </div>
+            )}
           </div>
         );
       })()}
+
+      {/* Health Badges */}
+      {healthBadges.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {healthBadges.map((b) => (
+            <span
+              key={b.label}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${badgeColours[b.rating]}`}
+            >
+              <span className="text-slate-400">{b.label}:</span>
+              <span>{b.value}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Metric cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -640,6 +731,9 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
           value={`$${m.total_pnl.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
           sub={m.total_pnl >= 0 ? "profit" : "loss"}
         />
+        {profitFactor !== null && (
+          <MetricCard label="Profit Factor" value={fmt(profitFactor)} />
+        )}
       </div>
 
       {/* Candlestick chart */}
