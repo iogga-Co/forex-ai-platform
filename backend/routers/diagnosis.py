@@ -7,7 +7,6 @@ POST /api/diagnosis/trades/analyze   — AI pattern analysis of a selected trade
 """
 
 import logging
-import statistics
 from typing import Annotated
 from uuid import UUID
 
