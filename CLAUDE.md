@@ -129,6 +129,16 @@ Apply `_f()` to every NUMERIC column before returning from any endpoint.
 
 `core/db.py` registers a `json.loads` codec for JSONB columns. `strategy_ir` and `ir_json` arrive as Python dicts, not strings — no manual `json.loads()` needed in route handlers.
 
+### Optimization iterations — `strategy_ir` field
+
+`GET /api/optimization/runs/{run_id}/iterations` returns `strategy_ir` (the full SIR JSON) for each iteration. This is used by the frontend to save an iteration as a new strategy and navigate to Backtest / Optimize / Refine / Superchart.
+
+Pattern in `frontend/src/app/optimization/page.tsx` — `saveIterAndNavigate(destination)`:
+1. POST to `/api/strategies` with the iteration's `strategy_ir` and a generated name (`[Opt iter N] PAIR TF`)
+2. On success, `router.push(destination URL)` with `strategy_id=<new_id>` plus run params pre-filled
+
+`strategy_ir` arrives as a Python dict (decoded by asyncpg JSONB codec) — no `json.loads` needed in the router. On the frontend it may be a plain object or a JSON string depending on caching; always handle both: `typeof rawIr === "string" ? JSON.parse(rawIr) : rawIr`.
+
 ### SSE (Server-Sent Events) streams
 
 Optimization progress is streamed via Redis pub/sub → SSE. Pattern in `routers/optimization.py`. The SSE auth dependency is `get_current_user_sse` (token via query param) not the standard Bearer header dependency.
@@ -185,6 +195,20 @@ function PageInner() {
 ```
 
 Without this, Next.js static prerendering crashes at build/lint time.
+
+### RunSummary interface — `strategy_id` required
+
+The `RunSummary` type in both `backtest/page.tsx` and `strategies/page.tsx` must include `strategy_id: string`. The API (`GET /api/backtest/results`) returns this field. It is needed by toolbar buttons (Superchart, Optimize, Refine links) to construct correct URLs. Do not omit it.
+
+### BacktestResultPanel — indicator display, no action buttons
+
+`src/components/BacktestResultPanel.tsx` shows the strategy's indicator parameters inline (no Optimize/Refine/View IR buttons). The display reads `strategy.ir_json` and renders:
+- Entry conditions as `key=value` chips (only fields actually present in the IR)
+- Exit conditions (SL/TP) formatted as `ATR(14) × 1.5`, `50 pips`, or `2%`
+- Filters and position sizing on a compact single row
+- Auto-column grid: 1 col (≤2 conditions), 2 col (3–4), 3 col (5+)
+
+Do not add navigation buttons back to this component — those live in the toolbar above each list.
 
 ### fetchWithAuth
 
