@@ -5,7 +5,9 @@ import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { fetchWithAuth } from "@/lib/auth";
 import BacktestResultPanel from "@/components/BacktestResultPanel";
+import DiagnosisSidebar from "@/components/DiagnosisSidebar";
 import { loadSettings } from "@/lib/settings";
+import type { StrategyIR } from "@/lib/irPatch";
 
 interface Strategy {
   id: string;
@@ -13,7 +15,7 @@ interface Strategy {
   description: string;
   pair: string;
   timeframe: string;
-  ir_json: { metadata?: { name?: string; description?: string } };
+  ir_json: StrategyIR;
 }
 
 interface JobStatus {
@@ -105,6 +107,7 @@ function BacktestPageInner() {
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notLoggedIn, setNotLoggedIn] = useState(false);
+  const [diagnosisOpen, setDiagnosisOpen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -197,7 +200,7 @@ function BacktestPageInner() {
   }
 
   const stratName = (s: Strategy) =>
-    s.description || s.ir_json?.metadata?.description?.slice(0, 40) || s.id.slice(0, 8);
+    s.description || (s.ir_json?.metadata?.description as string | undefined)?.slice(0, 40) || s.id.slice(0, 8);
 
   if (notLoggedIn) {
     return (
@@ -356,6 +359,11 @@ function BacktestPageInner() {
                   onClick={(e) => { if (!sel) e.preventDefault(); }}
                   className={`${btnBase} ${!sel ? btnOff : ""}`}
                 >Refine</Link>
+                <button
+                  disabled={!sel}
+                  onClick={() => setDiagnosisOpen(true)}
+                  className={`${btnBase} ${!sel ? "opacity-30 cursor-not-allowed" : ""}`}
+                >Diagnose</button>
                 {(() => {
                   const deleteIds = checkedIds.size > 0 ? checkedIds : sel ? new Set([sel.id]) : new Set<string>();
                   const canDelete = deleteIds.size > 0;
@@ -499,7 +507,7 @@ function BacktestPageInner() {
         <div className="flex-1 overflow-y-auto pl-6 min-w-0">
           <BacktestResultPanel
             id={selectedId}
-            onClose={() => setSelectedId(null)}
+            onClose={() => { setSelectedId(null); setDiagnosisOpen(false); }}
           />
         </div>
       ) : (
@@ -507,6 +515,25 @@ function BacktestPageInner() {
           {history.length > 0 ? "← Select a run to view results" : ""}
         </div>
       )}
+
+      {/* ── Diagnosis sidebar ── */}
+      {diagnosisOpen && selectedId && (() => {
+        const run = history.find((r) => r.id === selectedId);
+        const strat = run ? strategies.find((s) => s.id === run.strategy_id) : null;
+        if (!run || !strat) return null;
+        return (
+          <DiagnosisSidebar
+            backtestRunId={selectedId}
+            strategyId={run.strategy_id}
+            strategyIr={strat.ir_json}
+            pair={run.pair}
+            timeframe={run.timeframe}
+            periodStart={run.period_start.slice(0, 10)}
+            periodEnd={run.period_end.slice(0, 10)}
+            onClose={() => setDiagnosisOpen(false)}
+          />
+        );
+      })()}
     </div>
   );
 }
