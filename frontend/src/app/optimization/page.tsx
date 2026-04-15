@@ -485,7 +485,7 @@ function OptimizationPageInner() {
     }
   }
 
-  async function saveIterAndNavigate(destination: "optimize" | "refine" | "copilot" | "superchart") {
+  async function saveIterAndNavigate(destination: "backtest" | "optimize" | "refine" | "copilot" | "superchart") {
     if (!selectedIter || !selectedRun) return;
     setIterActionBusy(true);
     setIterActionError(null);
@@ -517,7 +517,11 @@ function OptimizationPageInner() {
       const saved = await res.json();
       const sid = saved.id;
 
-      if (destination === "optimize") {
+      if (destination === "backtest") {
+        router.push(
+          `/backtest?strategy_id=${sid}&pair=${encodeURIComponent(selectedRun.pair)}&timeframe=${encodeURIComponent(selectedRun.timeframe)}&period_start=${encodeURIComponent(selectedRun.period_start)}&period_end=${encodeURIComponent(selectedRun.period_end)}`,
+        );
+      } else if (destination === "optimize") {
         router.push(
           `/optimization?strategy_id=${sid}&pair=${encodeURIComponent(selectedRun.pair)}&timeframe=${encodeURIComponent(selectedRun.timeframe)}&period_start=${encodeURIComponent(selectedRun.period_start)}&period_end=${encodeURIComponent(selectedRun.period_end)}`,
         );
@@ -877,6 +881,13 @@ function OptimizationPageInner() {
                           Iter {selectedIter.iteration} selected —
                         </span>
                       )}
+                      <button
+                        disabled={!selectedIter || iterActionBusy}
+                        onClick={() => saveIterAndNavigate("backtest")}
+                        className="rounded-md border border-blue-700 px-3 py-1.5 text-xs text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Backtest
+                      </button>
                       <button
                         disabled={!selectedIter || iterActionBusy}
                         onClick={() => saveIterAndNavigate("optimize")}

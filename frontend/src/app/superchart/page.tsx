@@ -318,7 +318,9 @@ function SuperchartPageInner() {
       .then((r) => r.json())
       .then((data: BacktestResult[]) => {
         setBacktests(data);
-        setSelectedBtId("");
+        const urlBtId = searchParams.get("backtest_id");
+        const initial = urlBtId && data.find((b) => b.id === urlBtId) ? urlBtId : "";
+        setSelectedBtId(initial);
         setTrades([]);
       })
       .catch(() => {});

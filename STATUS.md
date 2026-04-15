@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-12 (Optimization tab + Backtest UI overhaul + staging deploy fixes + SSE debugging)
+**Last updated:** 2026-04-14 (UI polish sprint — toolbar actions, batch delete, sorting, indicator panel, persistent system prompt)
 
 ---
 
@@ -10,14 +10,52 @@
 |---|---|---|---|
 | **0** | Foundation | ✅ Complete | ✅ Health check returns 200 over HTTPS |
 | **1** | Core Engine | ✅ Complete | ✅ 58 tests pass, CI green, PR #7 merged, staging live |
-| **2** | AI Intelligence | ✅ Complete | ✅ Strategy created → backtest runs → results stored. AI summary live (Anthropic key updated 2026-04-10) |
+| **2** | AI Intelligence | ✅ Complete | ✅ Strategy created → backtest runs → results stored. AI summary live |
 | **3** | Analytics Suite | ✅ Complete | ✅ 283 trades stored, equity curve 283 pts, all /api/analytics endpoints live |
 | **4** | Live Trading | 🔲 Next | Pending |
 | **5** | Production Launch | 🔲 Pending | Pending |
 
 ---
 
-## Current Staging State (2026-04-11)
+## UI Polish Sprint (2026-04-14) — pending PR
+
+### Optimization tab
+- Iteration History table: click a row to highlight; toolbar above table activates with **Backtest / Optimize / Refine / Superchart** buttons
+- Clicking any button saves the iteration's `strategy_ir` as a new strategy (`[Opt iter N] PAIR TF`) then navigates to the destination
+- Backend: `strategy_ir` now included in `GET /api/optimization/runs/{id}/iterations` response
+
+### Strategies tab — Strategy list
+- Action buttons (Superchart, Backtest, Refine, View IR, Delete) moved to toolbar above list
+- Sortable by: Name · Pair · TF · Version · Conditions (click to sort, click again to reverse)
+- Batch delete: checkbox per row + select-all + trash shows count badge; confirm/cancel flow preserved
+
+### Strategies tab — Backtests list (middle panel)
+- Action buttons (Superchart, Backtest, Optimize, Refine, Delete) in toolbar above list
+- Select-all checkbox and sort buttons (Date · Sharpe · WR · PnL · Trades) appear below toolbar
+- Batch delete: same pattern as strategy list, immediate (no confirm)
+
+### Backtest tab — Historical Backtests table
+- Toolbar above table: **Superchart / Optimize / Refine / trash** — activate on highlighted row
+- Batch delete: checkbox per row + select-all + count badge on trash
+- Per-row trash icons removed (consolidated into toolbar)
+- Clicking a highlighted row deselects it
+
+### Backtest detail panel (BacktestResultPanel)
+- Replaced action buttons (View IR / Optimize → / Refine →) with **indicator parameter display**
+- Shows entry conditions as `key=value` chips — only params actually set in the IR (no hardcoded defaults)
+- Entry conditions in auto-column grid: 1 col (≤2), 2 col (3–4), 3 col (5+)
+- Exit conditions: SL/TP formatted as `ATR(14) × 1.5`, `50 pips`, or `2%`
+- Filters & sizing on one compact row; session hidden when "all" (default)
+
+### Co-Pilot tab
+- System prompt persisted to `localStorage` (`copilot_system_prompt`) — survives navigation and refresh
+
+### Superchart + Backtest pages
+- Both wrapped in `<Suspense>` to fix Next.js static prerendering error with `useSearchParams()`
+
+---
+
+## Current Staging State (2026-04-14)
 
 | Item | Value |
 |---|---|
