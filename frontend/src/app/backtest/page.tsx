@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { fetchWithAuth } from "@/lib/auth";
 import BacktestResultPanel from "@/components/BacktestResultPanel";
 import { loadSettings } from "@/lib/settings";
@@ -24,6 +25,7 @@ interface JobStatus {
 
 interface RunSummary {
   id: string;
+  strategy_id: string;
   pair: string;
   timeframe: string;
   period_start: string;
@@ -74,19 +76,29 @@ function sortRuns(runs: RunSummary[], key: SortKey, dir: SortDir): RunSummary[] 
 }
 
 export default function BacktestPage() {
+  return (
+    <Suspense>
+      <BacktestPageInner />
+    </Suspense>
+  );
+}
+
+function BacktestPageInner() {
+  const searchParams = useSearchParams();
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [history, setHistory] = useState<RunSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const cfg = loadSettings();
   const [form, setForm] = useState({
-    strategy_id: "",
-    pair: cfg.default_pair,
-    timeframe: cfg.default_timeframe,
-    period_start: cfg.default_period_start,
-    period_end: cfg.default_period_end,
+    strategy_id: searchParams.get("strategy_id") ?? "",
+    pair: searchParams.get("pair") ?? cfg.default_pair,
+    timeframe: searchParams.get("timeframe") ?? cfg.default_timeframe,
+    period_start: searchParams.get("period_start") ?? cfg.default_period_start,
+    period_end: searchParams.get("period_end") ?? cfg.default_period_end,
     initial_capital: String(cfg.default_initial_capital),
   });
   const [jobId, setJobId] = useState<string | null>(null);
@@ -108,8 +120,8 @@ export default function BacktestPage() {
           const list: Strategy[] = Array.isArray(data) ? data : data.strategies ?? [];
           setStrategies(list);
           setForm((f) => {
-            const stillExists = list.some((s) => s.id === f.strategy_id);
-            return stillExists ? f : { ...f, strategy_id: list[0]?.id ?? "" };
+            if (f.strategy_id && list.some((s) => s.id === f.strategy_id)) return f;
+            return { ...f, strategy_id: list[0]?.id ?? "" };
           });
         })
         .catch(() => {});
@@ -186,17 +198,6 @@ export default function BacktestPage() {
 
   const stratName = (s: Strategy) =>
     s.description || s.ir_json?.metadata?.description?.slice(0, 40) || s.id.slice(0, 8);
-
-  async function handleDeleteRun(id: string, e: React.MouseEvent) {
-    e.stopPropagation();
-    try {
-      await fetchWithAuth(`/api/backtest/results/${id}`, { method: "DELETE" });
-      setHistory((prev) => prev.filter((r) => r.id !== id));
-      if (selectedId === id) setSelectedId(null);
-    } catch {
-      // non-fatal
-    }
-  }
 
   if (notLoggedIn) {
     return (
@@ -333,10 +334,85 @@ export default function BacktestPage() {
 
         {/* History */}
         <div className="space-y-2 flex-1">
+          {/* Toolbar */}
+          {(() => {
+            const sel = history.find((r) => r.id === selectedId) ?? null;
+            const btnBase = "rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors";
+            const btnOff = "opacity-30 pointer-events-none";
+            return (
+              <div className="flex items-center gap-1 flex-nowrap">
+                <Link
+                  href={sel ? `/superchart?strategy_id=${sel.strategy_id}&backtest_id=${sel.id}` : "#"}
+                  onClick={(e) => { if (!sel) e.preventDefault(); }}
+                  className={`${btnBase} ${!sel ? btnOff : ""}`}
+                >Superchart</Link>
+                <Link
+                  href={sel ? `/optimization?strategy_id=${sel.strategy_id}&pair=${sel.pair}&timeframe=${sel.timeframe}&period_start=${sel.period_start.slice(0,10)}&period_end=${sel.period_end.slice(0,10)}` : "#"}
+                  onClick={(e) => { if (!sel) e.preventDefault(); }}
+                  className={`${btnBase} ${!sel ? btnOff : ""}`}
+                >Optimize</Link>
+                <Link
+                  href={sel ? `/copilot?strategy_id=${sel.strategy_id}` : "#"}
+                  onClick={(e) => { if (!sel) e.preventDefault(); }}
+                  className={`${btnBase} ${!sel ? btnOff : ""}`}
+                >Refine</Link>
+                {(() => {
+                  const deleteIds = checkedIds.size > 0 ? checkedIds : sel ? new Set([sel.id]) : new Set<string>();
+                  const canDelete = deleteIds.size > 0;
+                  return (
+                    <button
+                      disabled={!canDelete}
+                      title={checkedIds.size > 1 ? `Delete ${checkedIds.size} backtests` : "Delete backtest"}
+                      onClick={async () => {
+                        if (!canDelete) return;
+                        await Promise.allSettled(
+                          [...deleteIds].map((id) =>
+                            fetchWithAuth(`/api/backtest/results/${id}`, { method: "DELETE" })
+                          )
+                        );
+                        setHistory((prev) => prev.filter((r) => !deleteIds.has(r.id)));
+                        if (selectedId && deleteIds.has(selectedId)) setSelectedId(null);
+                        setCheckedIds(new Set());
+                      }}
+                      className="flex items-center gap-1 rounded border border-red-800 px-1.5 py-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6" /><path d="M14 11v6" />
+                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                      </svg>
+                      {checkedIds.size > 1 && (
+                        <span className="text-[10px] font-mono">{checkedIds.size}</span>
+                      )}
+                    </button>
+                  );
+                })()}
+              </div>
+            );
+          })()}
+
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Recent runs
-            </h2>
+            <div className="flex items-center gap-2">
+              {history.length > 0 && (
+                <input
+                  type="checkbox"
+                  title="Select all"
+                  checked={checkedIds.size === history.length}
+                  ref={(el) => {
+                    if (el) el.indeterminate = checkedIds.size > 0 && checkedIds.size < history.length;
+                  }}
+                  onChange={(e) => {
+                    if (e.target.checked) setCheckedIds(new Set(history.map((r) => r.id)));
+                    else setCheckedIds(new Set());
+                  }}
+                  className="h-3 w-3 accent-blue-500 cursor-pointer"
+                />
+              )}
+              <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Recent runs{checkedIds.size > 0 ? ` · ${checkedIds.size} selected` : ""}
+              </h2>
+            </div>
             {history.length > 1 && (
               <div className="flex items-center gap-1">
                 {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => {
@@ -369,40 +445,45 @@ export default function BacktestPage() {
                 <div
                   key={r.id}
                   className={[
-                    "group rounded-lg border transition-colors cursor-pointer",
+                    "rounded-lg border transition-colors cursor-pointer",
                     selectedId === r.id
                       ? "border-blue-600 bg-blue-900/20"
+                      : checkedIds.has(r.id)
+                      ? "border-blue-800 bg-blue-900/10"
                       : "border-gray-800 hover:border-gray-700 hover:bg-gray-800/50",
                   ].join(" ")}
-                  onClick={() => setSelectedId(r.id)}
+                  onClick={() => setSelectedId(r.id === selectedId ? null : r.id)}
                 >
                   <div className="px-3 py-2.5">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={checkedIds.has(r.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setCheckedIds((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(r.id);
+                            else next.delete(r.id);
+                            return next;
+                          });
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-3 w-3 shrink-0 accent-blue-500 cursor-pointer"
+                      />
                       <span className="text-xs font-medium text-gray-200">{r.pair}</span>
                       <span className="text-xs text-gray-500">{r.timeframe}</span>
                       <span className={`text-xs font-medium ml-auto ${r.total_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
                         {r.total_pnl >= 0 ? "+" : ""}${fmt(r.total_pnl, 0)}
                       </span>
                     </div>
-                    <div className="flex items-center gap-3 mt-1 text-xs">
+                    <div className="flex items-center gap-3 mt-1 text-xs pl-5">
                       <span className="text-gray-300">Sh <span className="font-medium">{fmt(r.sharpe)}</span></span>
                       <span className="text-gray-300">WR <span className="font-medium">{fmtPct(r.win_rate)}</span></span>
                       <span className="text-gray-300">Tr <span className="font-medium">{r.trade_count ?? "—"}</span></span>
                     </div>
-                    <div className="flex items-center justify-between mt-1">
+                    <div className="flex items-center justify-between mt-1 pl-5">
                       <span className="text-[10px] text-gray-600">{r.period_start.slice(0, 10)} → {r.period_end.slice(0, 10)}</span>
-                      <button
-                        onClick={(e) => handleDeleteRun(r.id, e)}
-                        className="opacity-0 group-hover:opacity-100 rounded border border-red-800 p-1 text-red-400 hover:bg-red-900/30 transition-all"
-                        title="Delete this backtest"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                          <path d="M10 11v6M14 11v6" />
-                          <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
-                        </svg>
-                      </button>
                       <span className="text-[10px] text-gray-600">{fmtDate(r.created_at)}</span>
                     </div>
                   </div>

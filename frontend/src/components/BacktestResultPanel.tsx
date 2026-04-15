@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { fetchWithAuth, getAccessToken } from "@/lib/auth";
 import {
@@ -156,8 +155,6 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
   >([]);
   const [indicatorData, setIndicatorData] = useState<IndicatorGroup[]>([]);
   const [strategy, setStrategy] = useState<Strategy | null>(null);
-  const [irExpanded, setIrExpanded] = useState(false);
-  const [irText, setIrText] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tradeFilter, setTradeFilter] = useState<"all" | "long" | "short" | "win" | "loss">("all");
@@ -179,8 +176,6 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
     setCandles([]);
     setIndicatorData([]);
     setStrategy(null);
-    setIrExpanded(false);
-    setIrText("");
     setError(null);
     setTradeFilter("all");
 
@@ -510,49 +505,128 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
         </div>
       </div>
 
-      {/* Strategy info */}
-      {strategy && (
-        <div className="bg-gray-800 rounded-lg p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-xs text-gray-500">
+      {/* Strategy info + indicator parameters */}
+      {strategy && (() => {
+        const ir = strategy.ir_json as {
+          entry_conditions?: Array<{
+            indicator: string; period?: number; operator: string; value?: number | null;
+            component?: string | null; fast?: number | null; slow?: number | null;
+            signal_period?: number | null; std_dev?: number | null;
+            k_smooth?: number | null; d_period?: number | null;
+          }>;
+          exit_conditions?: {
+            stop_loss?: { type: string; period?: number | null; multiplier?: number | null; pips?: number | null; percent?: number | null };
+            take_profit?: { type: string; period?: number | null; multiplier?: number | null; pips?: number | null; percent?: number | null };
+          };
+          filters?: { exclude_days?: string[]; session?: string };
+          position_sizing?: { risk_per_trade_pct?: number; max_size_units?: number };
+        };
+
+        function stopLabel(s: { type: string; period?: number | null; multiplier?: number | null; pips?: number | null; percent?: number | null } | undefined) {
+          if (!s) return "—";
+          if (s.type === "atr") return `ATR(${s.period}) × ${s.multiplier}`;
+          if (s.type === "fixed_pips") return `${s.pips} pips`;
+          if (s.type === "percent") return `${((s.percent ?? 0) * 100).toFixed(2)}%`;
+          return s.type;
+        }
+
+        type Cond = NonNullable<typeof ir.entry_conditions>[number];
+
+        // Emit every numeric/string parameter that is actually set in the IR
+        function condParams(c: Cond): Array<{ key: string; val: string | number }> {
+          const out: Array<{ key: string; val: string | number }> = [];
+          const add = (k: string, v: string | number | null | undefined) => {
+            if (v != null) out.push({ key: k, val: v });
+          };
+          // MACD uses fast/slow/signal_period instead of period
+          if (c.indicator === "MACD") {
+            add("fast", c.fast);
+            add("slow", c.slow);
+            add("sig", c.signal_period);
+          } else {
+            add("period", c.period);
+          }
+          add("std", c.std_dev);
+          add("k", c.k_smooth);
+          add("d", c.d_period);
+          add("component", c.component);
+          return out;
+        }
+
+        function condComparison(c: Cond) {
+          if (c.operator === "price_above") return "price above";
+          if (c.operator === "price_below") return "price below";
+          if (c.value != null) return `${c.operator} ${c.value}`;
+          return c.operator;
+        }
+
+        const filters = ir.filters;
+        const sizing = ir.position_sizing;
+        const sl = ir.exit_conditions?.stop_loss;
+        const tp = ir.exit_conditions?.take_profit;
+
+        // Compact label=value chip
+        const Chip = ({ label, value }: { label: string; value: string | number }) => (
+          <span className="inline-flex items-center gap-0.5 rounded bg-gray-700/70 px-1.5 py-0.5 text-[10px] font-mono leading-none">
+            <span className="text-gray-500">{label}=</span>
+            <span className="text-gray-200">{value}</span>
+          </span>
+        );
+
+        return (
+          <div className="bg-gray-800 rounded-lg px-3 py-2.5 space-y-2">
+            {/* Header row */}
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-xs font-medium text-gray-200 truncate">{strategy.description}</p>
+              <p className="text-[10px] text-gray-500 shrink-0 font-mono">
                 {strategy.pair} · {strategy.timeframe} · v{strategy.version}
               </p>
-              <p className="text-sm text-gray-200 mt-0.5 leading-snug">
-                {strategy.description}
-              </p>
             </div>
-            <div className="flex gap-2 shrink-0">
-              <button
-                onClick={() => setIrExpanded((v) => !v)}
-                className="rounded border border-blue-700 px-2.5 py-1 text-xs text-blue-400 hover:bg-blue-900/30 transition-colors"
-              >
-                {irExpanded ? "Hide IR" : "View IR"}
-              </button>
-              <Link
-                href={`/optimization?strategy_id=${strategy.id}&pair=${result.pair}&timeframe=${result.timeframe}&period_start=${result.period_start.slice(0, 10)}&period_end=${result.period_end.slice(0, 10)}`}
-                className="rounded border border-blue-700 px-2.5 py-1 text-xs text-blue-400 hover:bg-blue-900/30 transition-colors"
-              >
-                Optimize →
-              </Link>
-              <Link
-                href={`/copilot?strategy_id=${strategy.id}&backtest_id=${id}`}
-                className="rounded border border-blue-700 px-2.5 py-1 text-xs text-blue-400 hover:bg-blue-900/30 transition-colors"
-              >
-                Refine →
-              </Link>
+
+            {/* Entry conditions — auto-column grid based on count */}
+            {ir.entry_conditions && ir.entry_conditions.length > 0 && (() => {
+              const n = ir.entry_conditions!.length;
+              const cols = n <= 2 ? "grid-cols-1" : n <= 4 ? "grid-cols-2" : "grid-cols-3";
+              return (
+                <div className={`grid ${cols} gap-x-4 gap-y-1`}>
+                  {ir.entry_conditions!.map((c, i) => {
+                    const params = condParams(c);
+                    return (
+                      <div key={i} className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-semibold text-blue-400 font-mono w-10 shrink-0">{c.indicator}</span>
+                        {params.map(({ key, val }) => <Chip key={key} label={key} value={val} />)}
+                        <span className="text-[10px] text-gray-600 italic">{condComparison(c)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Exit + sizing + filters — single dense row */}
+            <div className="flex items-center gap-1.5 flex-wrap border-t border-gray-700/60 pt-1.5">
+              {sl && (
+                <><span className="text-[10px] text-gray-500 mr-0.5">SL</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(sl)}</span></>
+              )}
+              {tp && (
+                <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">TP</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(tp)}</span></>
+              )}
+              {sizing?.risk_per_trade_pct != null && (
+                <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">risk</span><span className="text-[10px] font-mono text-gray-300">{sizing.risk_per_trade_pct}%</span></>
+              )}
+              {sizing?.max_size_units != null && (
+                <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">size</span><span className="text-[10px] font-mono text-gray-300">{sizing.max_size_units.toLocaleString()}</span></>
+              )}
+              {filters?.session && filters.session !== "all" && (
+                <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">session</span><span className="text-[10px] font-mono text-gray-300">{filters.session}</span></>
+              )}
+              {filters?.exclude_days && filters.exclude_days.length > 0 && (
+                <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">excl</span><span className="text-[10px] font-mono text-gray-300">{filters.exclude_days.map(d => d.slice(0, 3)).join(",")}</span></>
+              )}
             </div>
           </div>
-          {irExpanded && (
-            <textarea
-              value={irText}
-              onChange={(e) => setIrText(e.target.value)}
-              spellCheck={false}
-              className="mt-3 w-full h-64 bg-gray-900 border border-gray-700 text-gray-300 text-xs font-mono rounded p-3 resize-y focus:outline-none focus:border-blue-600"
-            />
-          )}
-        </div>
-      )}
+        );
+      })()}
 
       {/* Metric cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

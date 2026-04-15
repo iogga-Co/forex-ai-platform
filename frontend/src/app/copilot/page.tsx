@@ -217,7 +217,9 @@ export default function CopilotPage() {
   const [sirProposal, setSirProposal] = useState<SirProposal | null>(null);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [loadingStrategy, setLoadingStrategy] = useState(false);
-  const [systemPrompt, setSystemPrompt] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState(() =>
+    typeof window !== "undefined" ? (localStorage.getItem("copilot_system_prompt") ?? "") : ""
+  );
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const refineLoadedRef = useRef(false);
@@ -436,7 +438,10 @@ export default function CopilotPage() {
               <textarea
                 rows={4}
                 value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
+                onChange={(e) => {
+                  setSystemPrompt(e.target.value);
+                  localStorage.setItem("copilot_system_prompt", e.target.value);
+                }}
                 placeholder="Add custom instructions for the AI Co-Pilot (e.g. 'Focus on low-drawdown strategies', 'Always explain your reasoning step by step')…"
                 className="w-full rounded-md bg-surface border border-surface-border px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-accent resize-none"
               />
