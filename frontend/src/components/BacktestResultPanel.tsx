@@ -28,6 +28,7 @@ import {
   type ExitCondition,
 } from "@/lib/strategyLabels";
 import { computeHealthBadges } from "@/lib/strategyHealth";
+import TradeAnalysisSidebar from "@/components/TradeAnalysisSidebar";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -195,8 +196,13 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
   const [sortCol, setSortCol] = useState<keyof Trade>("entry_time");
   const [sortAsc, setSortAsc] = useState(true);
   const [irView, setIrView] = useState<"story" | "json">("story");
+  const [checkedTradeIds, setCheckedTradeIds] = useState<Set<string>>(new Set());
+  const [selectPresetOpen, setSelectPresetOpen] = useState(false);
+  const [tradeAnalysisOpen, setTradeAnalysisOpen] = useState(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
+  const selectPresetRef = useRef<HTMLDivElement>(null);
   const oscContainerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // ---------------------------------------------------------------------------
@@ -214,6 +220,8 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
     setError(null);
     setTradeFilter("all");
     setIrView("story");
+    setCheckedTradeIds(new Set());
+    setTradeAnalysisOpen(false);
 
     Promise.all([
       fetchWithAuth(`/api/backtest/results/${id}`)
@@ -249,6 +257,17 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Close preset dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (selectPresetRef.current && !selectPresetRef.current.contains(e.target as Node)) {
+        setSelectPresetOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Chart effect
@@ -515,6 +534,59 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
     else { setSortCol(col); setSortAsc(true); }
   }
 
+  // Outlier detection — 2σ below mean loss
+  const lossValues = result.trades.filter((t) => t.pnl < 0).map((t) => t.pnl);
+  const avgLossVal = lossValues.length > 0 ? lossValues.reduce((s, v) => s + v, 0) / lossValues.length : 0;
+  const stdDevLoss = lossValues.length > 1
+    ? Math.sqrt(lossValues.reduce((s, v) => s + (v - avgLossVal) ** 2, 0) / lossValues.length)
+    : 0;
+  const outlierThreshold = avgLossVal - 2 * stdDevLoss;
+  const isOutlier = (t: Trade) => t.pnl < 0 && stdDevLoss > 0 && t.pnl < outlierThreshold;
+  const outlierMultiple = (t: Trade) =>
+    avgLossVal !== 0 ? Math.abs(t.pnl / avgLossVal).toFixed(1) : "?";
+
+  // Select-all checkbox indeterminate state
+  const visibleIds = sorted.slice(0, 200).map((t) => t.id);
+  const checkedCount = visibleIds.filter((id) => checkedTradeIds.has(id)).length;
+  const allChecked = visibleIds.length > 0 && checkedCount === visibleIds.length;
+  const someChecked = checkedCount > 0 && checkedCount < visibleIds.length;
+  if (selectAllRef.current) {
+    selectAllRef.current.indeterminate = someChecked;
+  }
+
+  function toggleAll() {
+    if (allChecked) {
+      setCheckedTradeIds((prev) => {
+        const next = new Set(prev);
+        visibleIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setCheckedTradeIds((prev) => new Set([...prev, ...visibleIds]));
+    }
+  }
+
+  function toggleTrade(id: string) {
+    setCheckedTradeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) { next.delete(id); } else { next.add(id); }
+      return next;
+    });
+  }
+
+  function applyPreset(preset: string) {
+    setSelectPresetOpen(false);
+    let ids: string[] = [];
+    const all200 = sorted.slice(0, 200);
+    if (preset === "losers")  ids = all200.filter((t) => t.pnl < 0).map((t) => t.id);
+    else if (preset === "winners") ids = all200.filter((t) => t.pnl > 0).map((t) => t.id);
+    else if (preset === "longs")   ids = all200.filter((t) => t.direction === "long").map((t) => t.id);
+    else if (preset === "shorts")  ids = all200.filter((t) => t.direction === "short").map((t) => t.id);
+    else if (preset === "outliers") ids = all200.filter(isOutlier).map((t) => t.id);
+    else if (preset === "clear") { setCheckedTradeIds(new Set()); return; }
+    setCheckedTradeIds(new Set(ids));
+  }
+
   const token = getAccessToken() ?? "";
   const ddPoints = equityCurve.map((p) => ({
     time: p.time,
@@ -656,7 +728,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
                         <div key={i} className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[10px] font-semibold text-blue-400 font-mono w-10 shrink-0">{c.indicator}</span>
                           {params.map(({ key, val }) => <Chip key={key} label={key} value={val} />)}
-                          <span className="text-[10px] text-gray-600 italic">{condComparison(c)}</span>
+                          <span className="text-[10px] text-gray-400 italic">{condComparison(c)}</span>
                         </div>
                       );
                     })}
@@ -680,22 +752,22 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
             ) : (
               <div className="flex items-center gap-1.5 flex-wrap border-t border-gray-700/60 pt-1.5">
                 {sl && (
-                  <><span className="text-[10px] text-gray-500 mr-0.5">SL</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(sl)}</span></>
+                  <><span className="text-[10px] text-gray-400 mr-0.5">SL</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(sl)}</span></>
                 )}
                 {tp && (
-                  <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">TP</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(tp)}</span></>
+                  <><span className="text-[10px] text-gray-400 ml-1 mr-0.5">TP</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(tp)}</span></>
                 )}
                 {sizing?.risk_per_trade_pct != null && (
-                  <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">risk</span><span className="text-[10px] font-mono text-gray-300">{sizing.risk_per_trade_pct}%</span></>
+                  <><span className="text-[10px] text-gray-400 ml-1 mr-0.5">risk</span><span className="text-[10px] font-mono text-gray-300">{sizing.risk_per_trade_pct}%</span></>
                 )}
                 {sizing?.max_size_units != null && (
-                  <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">size</span><span className="text-[10px] font-mono text-gray-300">{sizing.max_size_units.toLocaleString()}</span></>
+                  <><span className="text-[10px] text-gray-400 ml-1 mr-0.5">size</span><span className="text-[10px] font-mono text-gray-300">{sizing.max_size_units.toLocaleString()}</span></>
                 )}
                 {filters?.session && filters.session !== "all" && (
-                  <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">session</span><span className="text-[10px] font-mono text-gray-300">{filters.session}</span></>
+                  <><span className="text-[10px] text-gray-400 ml-1 mr-0.5">session</span><span className="text-[10px] font-mono text-gray-300">{filters.session}</span></>
                 )}
                 {filters?.exclude_days && filters.exclude_days.length > 0 && (
-                  <><span className="text-[10px] text-gray-500 ml-1 mr-0.5">excl</span><span className="text-[10px] font-mono text-gray-300">{filters.exclude_days.map(d => d.slice(0, 3)).join(",")}</span></>
+                  <><span className="text-[10px] text-gray-400 ml-1 mr-0.5">excl</span><span className="text-[10px] font-mono text-gray-300">{filters.exclude_days.map(d => d.slice(0, 3)).join(",")}</span></>
                 )}
               </div>
             )}
@@ -838,9 +910,16 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
 
       {/* Trade table */}
       <div className="bg-gray-800 rounded-lg p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-gray-300">Trades ({filtered.length})</h3>
-          <div className="flex gap-1">
+        {/* Toolbar */}
+        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium text-gray-300">Trades ({filtered.length})</h3>
+            {checkedTradeIds.size > 0 && (
+              <span className="text-xs text-blue-400">{checkedTradeIds.size} selected</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 flex-wrap">
+            {/* Filter buttons */}
             {(["all", "long", "short", "win", "loss"] as const).map((f) => (
               <button
                 key={f}
@@ -852,23 +931,71 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
                 {f}
               </button>
             ))}
+            {/* Select preset dropdown */}
+            <div className="relative" ref={selectPresetRef}>
+              <button
+                onClick={() => setSelectPresetOpen((o) => !o)}
+                className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-slate-200 hover:border-slate-400 transition-colors ml-1"
+              >
+                Select ▾
+              </button>
+              {selectPresetOpen && (
+                <div className="absolute right-0 top-full mt-1 w-44 bg-slate-800 border border-slate-700 rounded shadow-lg z-20 py-1">
+                  {[
+                    ["losers",   "All losing trades"],
+                    ["winners",  "All winning trades"],
+                    ["longs",    "All long trades"],
+                    ["shorts",   "All short trades"],
+                    ["outliers", "Outlier losses (2σ)"],
+                    ["clear",    "Clear selection"],
+                  ].map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => applyPreset(key)}
+                      className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700 transition-colors"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Analyze button */}
+            <button
+              onClick={() => setTradeAnalysisOpen(true)}
+              disabled={checkedTradeIds.size < 2}
+              className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors ml-1"
+            >
+              Analyze {checkedTradeIds.size > 0 ? checkedTradeIds.size : ""} trades
+            </button>
           </div>
         </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-gray-300">
             <thead>
               <tr className="text-gray-500 border-b border-gray-700">
+                {/* Checkbox column */}
+                <th className="w-7 py-2 pr-2">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    checked={allChecked}
+                    onChange={toggleAll}
+                    className="cursor-pointer accent-blue-500"
+                  />
+                </th>
                 {(
                   [
-                    ["entry_time", "Entry"],
-                    ["exit_time", "Exit"],
-                    ["direction", "Dir"],
-                    ["entry_price", "Entry $"],
-                    ["exit_price", "Exit $"],
-                    ["pnl", "P&L"],
-                    ["r_multiple", "R"],
-                    ["mae", "MAE"],
-                    ["mfe", "MFE"],
+                    ["entry_time",   "Entry"],
+                    ["exit_time",    "Exit"],
+                    ["direction",    "Dir"],
+                    ["entry_price",  "Entry $"],
+                    ["exit_price",   "Exit $"],
+                    ["pnl",          "P&L"],
+                    ["r_multiple",   "R"],
+                    ["mae",          "MAE"],
+                    ["mfe",          "MFE"],
                   ] as [keyof Trade, string][]
                 ).map(([col, label]) => (
                   <th
@@ -882,25 +1009,53 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
               </tr>
             </thead>
             <tbody>
-              {sorted.slice(0, 200).map((t) => (
-                <tr key={t.id} className="border-b border-gray-700/50 hover:bg-gray-700/30">
-                  <td className="py-1.5 pr-4">{fmtDateTime(t.entry_time)}</td>
-                  <td className="pr-4">{fmtDateTime(t.exit_time)}</td>
-                  <td className="pr-4">
-                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${t.direction === "long" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}>
-                      {t.direction}
-                    </span>
-                  </td>
-                  <td className="pr-4 font-mono">{t.entry_price.toFixed(5)}</td>
-                  <td className="pr-4 font-mono">{t.exit_price.toFixed(5)}</td>
-                  <td className={`pr-4 font-mono ${t.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(0)}
-                  </td>
-                  <td className="pr-4 font-mono">{t.r_multiple.toFixed(2)}R</td>
-                  <td className="pr-4 font-mono text-gray-500">{t.mae.toFixed(5)}</td>
-                  <td className="font-mono text-gray-500">{t.mfe.toFixed(5)}</td>
-                </tr>
-              ))}
+              {sorted.slice(0, 200).map((t) => {
+                const checked = checkedTradeIds.has(t.id);
+                const outlier = isOutlier(t);
+                return (
+                  <tr
+                    key={t.id}
+                    onClick={() => toggleTrade(t.id)}
+                    className={`border-b border-gray-700/50 cursor-pointer transition-colors ${
+                      checked
+                        ? "border-blue-800 bg-blue-900/10"
+                        : "hover:bg-gray-700/30"
+                    }`}
+                  >
+                    <td className="py-1.5 pr-2" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleTrade(t.id)}
+                        className="cursor-pointer accent-blue-500"
+                      />
+                    </td>
+                    <td className="py-1.5 pr-4">{fmtDateTime(t.entry_time)}</td>
+                    <td className="pr-4">{fmtDateTime(t.exit_time)}</td>
+                    <td className="pr-4">
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${t.direction === "long" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}>
+                        {t.direction}
+                      </span>
+                    </td>
+                    <td className="pr-4 font-mono">{t.entry_price.toFixed(5)}</td>
+                    <td className="pr-4 font-mono">{t.exit_price.toFixed(5)}</td>
+                    <td className={`pr-4 font-mono ${t.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {outlier && (
+                        <span
+                          className="text-yellow-500 mr-1"
+                          title={`Loss is ${outlierMultiple(t)}× larger than the average loss — worth investigating`}
+                        >
+                          ⚠
+                        </span>
+                      )}
+                      {t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(0)}
+                    </td>
+                    <td className="pr-4 font-mono">{t.r_multiple.toFixed(2)}R</td>
+                    <td className="pr-4 font-mono text-gray-500">{t.mae.toFixed(5)}</td>
+                    <td className="font-mono text-gray-500">{t.mfe.toFixed(5)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {filtered.length > 200 && (
@@ -910,6 +1065,15 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
           )}
         </div>
       </div>
+
+      {/* Trade Analysis Sidebar */}
+      {tradeAnalysisOpen && checkedTradeIds.size >= 2 && (
+        <TradeAnalysisSidebar
+          backtestRunId={result.id}
+          tradeIds={[...checkedTradeIds]}
+          onClose={() => setTradeAnalysisOpen(false)}
+        />
+      )}
     </div>
   );
 }
