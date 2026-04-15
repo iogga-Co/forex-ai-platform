@@ -211,7 +211,6 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
           .then((s: Strategy | null) => {
             if (s) {
               setStrategy(s);
-              setIrText(JSON.stringify(s.ir_json, null, 2));
             }
           })
           .catch(() => {});
