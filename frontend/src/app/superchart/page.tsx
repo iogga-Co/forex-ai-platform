@@ -12,6 +12,7 @@ import {
   Time,
 } from "lightweight-charts";
 import { fetchWithAuth } from "@/lib/auth";
+import DiagnosisPanel from "@/components/DiagnosisPanel";
 import {
   ema, sma, rsi, macd, bollingerBands, atr, adx, stochastic,
   toChartData, Series,
@@ -166,6 +167,11 @@ function SuperchartPageInner() {
   // --- strategy IR (editable copy) ---
   const [currentSIR, setCurrentSIR] = useState<StrategyIR | null>(null);
   const [originalSIR, setOriginalSIR] = useState<StrategyIR | null>(null);
+
+  // --- period diagnosis ---
+  const [diagPeriodStart, setDiagPeriodStart] = useState("");
+  const [diagPeriodEnd, setDiagPeriodEnd] = useState("");
+  const [diagPanelOpen, setDiagPanelOpen] = useState(false);
 
   // --- UI state ---
   const [loadingCandles, setLoadingCandles] = useState(false);
@@ -341,6 +347,10 @@ function SuperchartPageInner() {
       setTimeframe(bt.timeframe);
       setDateFrom(bt.period_start.slice(0, 10));
       setDateTo(bt.period_end.slice(0, 10));
+      // Pre-fill diagnosis period with the full backtest window
+      setDiagPeriodStart(bt.period_start.slice(0, 10));
+      setDiagPeriodEnd(bt.period_end.slice(0, 10));
+      setDiagPanelOpen(false);
     }
     fetchWithAuth(`${API_BASE}/api/backtest/results/${selectedBtId}`)
       .then((r) => r.json())
@@ -541,6 +551,14 @@ function SuperchartPageInner() {
     ? JSON.stringify(currentSIR.entry_conditions) !== JSON.stringify(originalSIR.entry_conditions)
     : false;
 
+  // Trades filtered to the diagnosis period window
+  const diagTrades = diagPeriodStart && diagPeriodEnd
+    ? trades.filter(t => {
+        const ts = t.entry_time;
+        return ts >= diagPeriodStart && ts <= diagPeriodEnd + "T23:59:59Z";
+      })
+    : trades;
+
   const selectedStratName = strategies.find((s) => s.id === selectedStratId)?.description ?? "";
 
   const oscillatorsInStrategy: OscTab[] = currentSIR
@@ -616,6 +634,19 @@ function SuperchartPageInner() {
 
   return (
     <div className="flex flex-col h-screen bg-[#09090b] text-zinc-200 overflow-hidden">
+      {diagPanelOpen && selectedBtId && (
+        <div className="fixed inset-0 z-50 flex justify-end pointer-events-none">
+          <div className="w-80 pointer-events-auto h-full shadow-2xl">
+            <DiagnosisPanel
+              backtestRunId={selectedBtId}
+              periodStart={diagPeriodStart ? `${diagPeriodStart}T00:00:00Z` : new Date().toISOString()}
+              periodEnd={diagPeriodEnd ? `${diagPeriodEnd}T23:59:59Z` : new Date().toISOString()}
+              tradeCount={diagTrades.length}
+              onClose={() => setDiagPanelOpen(false)}
+            />
+          </div>
+        </div>
+      )}
       {/* ------------------------------------------------------------------ */}
       {/* Toolbar                                                             */}
       {/* ------------------------------------------------------------------ */}
@@ -803,6 +834,46 @@ function SuperchartPageInner() {
                 {currentSIR.exit_conditions.take_profit && (
                   <div>TP: ATR × {currentSIR.exit_conditions.take_profit.multiplier ?? "?"} (p={currentSIR.exit_conditions.take_profit.period ?? "?"})</div>
                 )}
+              </div>
+            </Section>
+          )}
+
+          {/* Period Diagnosis */}
+          {selectedBtId && (
+            <Section title="Period Diagnosis">
+              <div className="space-y-1.5">
+                <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                  <div>
+                    <label className="text-[10px] text-zinc-500 leading-none block mb-0.5">From</label>
+                    <input
+                      type="date"
+                      value={diagPeriodStart}
+                      onChange={e => { setDiagPeriodStart(e.target.value); setDiagPanelOpen(false); }}
+                      className="w-full bg-zinc-800 border border-zinc-600 rounded px-1.5 py-0.5 text-xs text-zinc-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-500 leading-none block mb-0.5">To</label>
+                    <input
+                      type="date"
+                      value={diagPeriodEnd}
+                      onChange={e => { setDiagPeriodEnd(e.target.value); setDiagPanelOpen(false); }}
+                      className="w-full bg-zinc-800 border border-zinc-600 rounded px-1.5 py-0.5 text-xs text-zinc-200"
+                    />
+                  </div>
+                </div>
+                {diagTrades.length > 0 && (
+                  <p className="text-[10px] text-zinc-500">
+                    {diagTrades.length} trade{diagTrades.length !== 1 ? "s" : ""} in window
+                  </p>
+                )}
+                <button
+                  disabled={diagTrades.length < 2 || !diagPeriodStart || !diagPeriodEnd}
+                  onClick={() => setDiagPanelOpen(true)}
+                  className="w-full rounded border border-blue-700 px-2 py-1 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  {diagTrades.length < 2 ? "Select a period with ≥ 2 trades" : `Diagnose this period (${diagTrades.length} trades)`}
+                </button>
               </div>
             </Section>
           )}

@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/strategies",   label: "Strategies",   phase: 2 },
   { href: "/copilot",      label: "AI Co-Pilot",  phase: 2 },
   { href: "/optimization", label: "Optimize",     phase: 3 },
+  { href: "/news",         label: "ForEx News",   phase: null },
   { href: "/live",         label: "Live Trading", phase: 4 },
 ] as const;
 

@@ -4,15 +4,18 @@ Diagnosis endpoints.
 POST /api/diagnosis/strategy         — AI-powered strategy weakness analysis.
 POST /api/diagnosis/trades/stats     — pre-compute selection vs population stats (no AI).
 POST /api/diagnosis/trades/analyze   — AI pattern analysis of a selected trade subset.
+POST /api/diagnosis/period           — AI analysis of a date-range window (with optional news correlation).
 """
 
 import logging
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from ai.period_diagnosis import diagnose_period
 from ai.strategy_diagnosis import diagnose_strategy
 from ai.trade_analysis import analyze_trades
 from core.auth import TokenData, get_current_user
@@ -316,4 +319,113 @@ async def trade_analyze_endpoint(
         pair=run["pair"],
         timeframe=run["timeframe"],
         stats=payload.stats,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/diagnosis/period
+# ---------------------------------------------------------------------------
+
+class PeriodDiagnosisRequest(BaseModel):
+    backtest_run_id: UUID
+    period_start: datetime
+    period_end: datetime
+    include_news: bool = True
+
+
+@router.post("/period")
+async def period_diagnosis_endpoint(
+    payload: PeriodDiagnosisRequest,
+    _: Annotated[TokenData | None, Depends(get_current_user)] = None,
+) -> dict:
+    """AI analysis of a specific date-range window within a backtest run."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Fetch strategy info
+        run = await conn.fetchrow(
+            """
+            SELECT br.pair, br.timeframe, s.description
+            FROM   backtest_runs br
+            JOIN   strategies s ON s.id = br.strategy_id
+            WHERE  br.id = $1
+            """,
+            payload.backtest_run_id,
+        )
+        if not run:
+            raise HTTPException(status_code=404, detail="Backtest run not found")
+
+        # Fetch trades in the window
+        trades_raw = await conn.fetch(
+            """
+            SELECT direction, entry_price, exit_price, pnl,
+                   entry_time, exit_time,
+                   (exit_time - entry_time) AS duration
+            FROM   trades
+            WHERE  backtest_run_id = $1
+              AND  entry_time BETWEEN $2 AND $3
+            ORDER  BY entry_time
+            """,
+            payload.backtest_run_id,
+            payload.period_start,
+            payload.period_end,
+        )
+
+        trades = [
+            {
+                "direction":    t["direction"],
+                "entry_price":  _f(t["entry_price"]),
+                "exit_price":   _f(t["exit_price"]),
+                "pnl":          _f(t["pnl"]),
+                "entry_time":   t["entry_time"].strftime("%Y-%m-%d %H:%M UTC"),
+                "exit_time":    t["exit_time"].strftime("%Y-%m-%d %H:%M UTC"),
+                "duration_min": t["duration"].total_seconds() / 60,
+            }
+            for t in trades_raw
+        ]
+
+        if len(trades) < 2:
+            return {
+                "summary": "Not enough trades in this window for a meaningful analysis.",
+                "patterns": [],
+                "verdict": "inconclusive",
+                "recommendation": "Widen the selected period or choose a window with more trade activity.",
+            }
+
+        # Optionally fetch news events in the window (±30 min buffer)
+        news_events: list[dict] = []
+        if payload.include_news:
+            try:
+                news_raw = await conn.fetch(
+                    """
+                    SELECT event_time, currency, title, impact, forecast, actual
+                    FROM   news_events
+                    WHERE  event_time BETWEEN $1 - interval '30 minutes'
+                                          AND $2 + interval '30 minutes'
+                      AND  impact = 'high'
+                    ORDER  BY event_time
+                    """,
+                    payload.period_start,
+                    payload.period_end,
+                )
+                news_events = [
+                    {
+                        "event_time": r["event_time"].strftime("%Y-%m-%d %H:%M UTC"),
+                        "currency":   r["currency"],
+                        "title":      r["title"],
+                        "impact":     r["impact"],
+                        "forecast":   r["forecast"],
+                        "actual":     r["actual"],
+                    }
+                    for r in news_raw
+                ]
+            except Exception as exc:
+                # news_events table may not exist yet — gracefully degrade
+                logger.warning("news_events query failed (table may not exist): %s", exc)
+
+    return await diagnose_period(
+        strategy_name=run["description"] or "Unnamed Strategy",
+        pair=run["pair"],
+        timeframe=run["timeframe"],
+        trades=trades,
+        news_events=news_events if news_events else None,
     )
