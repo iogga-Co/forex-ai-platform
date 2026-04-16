@@ -243,6 +243,7 @@ export default function StrategiesPage() {
   const [loadingBacktests, setLoadingBacktests] = useState(false);
   const [selectedBacktestId, setSelectedBacktestId] = useState<string | null>(null);
   const [checkedBacktestIds, setCheckedBacktestIds] = useState<Set<string>>(new Set());
+  const [confirmingBacktest, setConfirmingBacktest] = useState(false);
 
   // Toolbar state
   const [showIR, setShowIR] = useState(false);
@@ -287,6 +288,7 @@ export default function StrategiesPage() {
     setBacktests([]);
     setShowIR(false);
     setConfirming(false);
+    setConfirmingBacktest(false);
     setLoadingBacktests(true);
     const { backtest_history_limit } = loadSettings();
     fetchWithAuth(`${API_BASE}/api/backtest/results?strategy_id=${id}&limit=${backtest_history_limit}`)
@@ -586,31 +588,48 @@ export default function StrategiesPage() {
                   >
                     Refine
                   </Link>
-                  <button
-                    disabled={!canDelete}
-                    title={deleteIds.size > 1 ? `Delete ${deleteIds.size} backtests` : "Delete backtest"}
-                    onClick={async () => {
-                      if (!canDelete) return;
-                      await Promise.allSettled(
-                        [...deleteIds].map((id) => fetchWithAuth(`${API_BASE}/api/backtest/results/${id}`, { method: "DELETE" }))
-                      );
-                      setBacktests((prev) => prev.filter((b) => !deleteIds.has(b.id)));
-                      if (selectedBacktestId && deleteIds.has(selectedBacktestId)) setSelectedBacktestId(null);
-                      setCheckedBacktestIds(new Set());
-                    }}
-                    className="flex items-center gap-1 rounded border border-red-800 p-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                      <path d="M10 11v6" />
-                      <path d="M14 11v6" />
-                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                    </svg>
-                    {deleteIds.size > 1 && (
-                      <span className="text-[10px] font-mono">{deleteIds.size}</span>
-                    )}
-                  </button>
+                  {confirmingBacktest ? (
+                    <>
+                      <button
+                        onClick={async () => {
+                          await Promise.allSettled(
+                            [...deleteIds].map((id) => fetchWithAuth(`${API_BASE}/api/backtest/results/${id}`, { method: "DELETE" }))
+                          );
+                          setBacktests((prev) => prev.filter((b) => !deleteIds.has(b.id)));
+                          if (selectedBacktestId && deleteIds.has(selectedBacktestId)) setSelectedBacktestId(null);
+                          setCheckedBacktestIds(new Set());
+                          setConfirmingBacktest(false);
+                        }}
+                        className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white hover:bg-red-500 transition-colors"
+                      >
+                        {deleteIds.size > 1 ? `Delete ${deleteIds.size}` : "Confirm"}
+                      </button>
+                      <button
+                        onClick={() => setConfirmingBacktest(false)}
+                        className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      disabled={!canDelete}
+                      title={deleteIds.size > 1 ? `Delete ${deleteIds.size} backtests` : "Delete backtest"}
+                      onClick={() => setConfirmingBacktest(true)}
+                      className="flex items-center gap-1 rounded border border-red-800 p-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6" />
+                        <path d="M14 11v6" />
+                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                      </svg>
+                      {deleteIds.size > 1 && (
+                        <span className="text-[10px] font-mono">{deleteIds.size}</span>
+                      )}
+                    </button>
+                  )}
                   {backtests.length > 0 && (
                     <input
                       type="checkbox"
