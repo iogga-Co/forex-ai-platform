@@ -30,22 +30,26 @@ AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (
 ```
 forex-ai-platform/
 ├── backend/
-│   ├── routers/          # FastAPI route handlers (auth, backtest, strategy, optimization, analytics, copilot, candles, trading, ws)
-│   ├── engine/           # Backtesting engine (sir.py — SIR schema, parser.py, runner.py, indicators.py, metrics.py, filters.py, sizing.py)
+│   ├── routers/          # FastAPI route handlers (auth, backtest, strategy, optimization,
+│   │                     #   analytics, copilot, candles, trading, ws, diagnosis)
+│   ├── engine/           # Backtesting engine (sir.py — SIR schema, parser.py, runner.py,
+│   │                     #   indicators.py, metrics.py, filters.py, sizing.py)
 │   ├── tasks/            # Celery tasks (backtest.py, optimization.py)
-│   ├── ai/               # Claude client, optimization agent, Voyage AI retrieval
+│   ├── ai/               # Claude client, optimization agent, Voyage AI retrieval,
+│   │                     #   strategy_diagnosis.py, trade_analysis.py
 │   ├── core/             # Config, DB pool, auth (JWT)
 │   ├── data/             # OHLCV ingest pipeline, quality checks
 │   └── scripts/          # backfill.py — historical data loader
 ├── frontend/
 │   └── src/
-│       ├── app/          # Next.js pages: backtest, copilot, dashboard, live, login, optimization, settings, strategies, superchart
-│       ├── components/   # BacktestResultPanel, AuthGuard, etc.
-│       └── lib/          # auth.ts, settings.ts
+│       ├── app/          # Next.js pages: backtest, copilot, dashboard, live, login,
+│       │                 #   optimization, settings, strategies, superchart
+│       ├── components/   # BacktestResultPanel, TradeAnalysisSidebar, AuthGuard, etc.
+│       └── lib/          # auth.ts, settings.ts, strategyLabels.ts
 ├── db/migrations/        # SQL migration files (apply manually on existing DB)
 ├── nginx/                # nginx.conf + certs
 ├── docker-compose.yml
-├── docker-compose.dev.yml  # adds bind mounts for local hot reload
+├── docker-compose.dev.yml  # adds bind mounts + NEXT_PUBLIC_API_URL="" for local hot reload
 └── doppler.yaml
 ```
 
@@ -129,6 +133,14 @@ Apply `_f()` to every NUMERIC column before returning from any endpoint.
 
 `core/db.py` registers a `json.loads` codec for JSONB columns. `strategy_ir` and `ir_json` arrive as Python dicts, not strings — no manual `json.loads()` needed in route handlers.
 
+### asyncpg timedelta columns
+
+Duration arithmetic (e.g. `exit_time - entry_time`) returns a Python `timedelta`. Convert to minutes with:
+
+```python
+def _dur_min(t): return (t["exit_time"] - t["entry_time"]).total_seconds() / 60
+```
+
 ### Optimization iterations — `strategy_ir` field
 
 `GET /api/optimization/runs/{run_id}/iterations` returns `strategy_ir` (the full SIR JSON) for each iteration. This is used by the frontend to save an iteration as a new strategy and navigate to Backtest / Optimize / Refine / Superchart.
@@ -151,6 +163,27 @@ Optimization progress is streamed via Redis pub/sub → SSE. Pattern in `routers
 ### pgvector queries
 
 PostgreSQL cannot infer the type of unreferenced `$N` parameters. If multiple queries share a params array and some `$N` indices are skipped, split into separate param arrays — one per query.
+
+---
+
+## AI Diagnosis endpoints
+
+`backend/routers/diagnosis.py` — prefix `/api/diagnosis`
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/diagnosis/strategy` | Single-strategy weakness analysis — fetches metrics + trades, pre-computes stats, calls Claude, returns up to 3 structured fix suggestions with `ir_patch` objects |
+| `POST /api/diagnosis/trades/stats` | Selection vs population trade stats — takes `backtest_run_id` + `trade_ids`; returns win rate, avg PnL/R, duration, MAE/MFE, long/short breakdown, by_hour, by_dow for both the selection and the full run |
+| `POST /api/diagnosis/trades/analyze` | AI pattern analysis — takes pre-computed `stats` dict (from `/trades/stats`); calls `ai/trade_analysis.py` → Claude; returns `{headline, patterns, verdict, recommendation}` |
+
+AI modules:
+- `backend/ai/strategy_diagnosis.py` — single-strategy diagnosis prompt + Claude call
+- `backend/ai/trade_analysis.py` — multi-trade pattern analysis prompt + Claude call
+
+**Two-step fetch pattern for trade analysis:** call `/trades/stats` first, render the stats, then call `/trades/analyze` with the stats dict. This avoids sending raw trade data to Claude and produces tighter prompts.
+
+Verdict values: `"structural" | "edge_decay" | "outlier" | "inconclusive"`  
+Pattern strength values: `"strong" | "moderate" | "weak"`
 
 ---
 
@@ -200,15 +233,61 @@ Without this, Next.js static prerendering crashes at build/lint time.
 
 The `RunSummary` type in both `backtest/page.tsx` and `strategies/page.tsx` must include `strategy_id: string`. The API (`GET /api/backtest/results`) returns this field. It is needed by toolbar buttons (Superchart, Optimize, Refine links) to construct correct URLs. Do not omit it.
 
-### BacktestResultPanel — indicator display, no action buttons
+### BacktestResultPanel — trade checkboxes + AI analysis
 
-`src/components/BacktestResultPanel.tsx` shows the strategy's indicator parameters inline (no Optimize/Refine/View IR buttons). The display reads `strategy.ir_json` and renders:
-- Entry conditions as `key=value` chips (only fields actually present in the IR)
-- Exit conditions (SL/TP) formatted as `ATR(14) × 1.5`, `50 pips`, or `2%`
-- Filters and position sizing on a compact single row
+`src/components/BacktestResultPanel.tsx` shows indicator parameters and the trade list with multi-trade selection:
+
+- Entry/exit condition chips, filters, and position sizing rows (reads `strategy.ir_json`)
 - Auto-column grid: 1 col (≤2 conditions), 2 col (3–4), 3 col (5+)
+- Trade table has a checkbox column — `checkedTradeIds: Set<string>` state
+- Select-all checkbox uses `ref` callback for `indeterminate` state
+- Row click toggles selection; checked rows get `border-blue-800 bg-blue-900/10` tint
+- Outlier detection: trades with loss > 2σ below mean loss get a ⚠ icon + tooltip
+- "Analyze N trades" button (disabled when `< 2` selected) opens `TradeAnalysisSidebar`
+- `toggleTrade(id)` uses `if/else` not ternary (ternary unused-expression is a lint error)
 
-Do not add navigation buttons back to this component — those live in the toolbar above each list.
+Do not add Optimize/Refine/View IR navigation buttons to this component — those live in the toolbar above each list.
+
+### TradeAnalysisSidebar
+
+`src/components/TradeAnalysisSidebar.tsx` — props: `backtestRunId`, `tradeIds`, `onClose`
+
+Two-step fetch on mount:
+1. POST `/api/diagnosis/trades/stats` → show selection vs population stats table
+2. POST `/api/diagnosis/trades/analyze` → show AI patterns + verdict
+
+Strength badge colours: `strong` = red, `moderate` = yellow, `weak` = slate  
+Verdict badge colours: `structural` = orange, `edge_decay` = red, `outlier` = blue, `inconclusive` = slate
+
+### strategyLabels utility
+
+`src/lib/strategyLabels.ts` exports:
+- `conditionToLabel(c: EntryCondition)` — human-readable entry condition string
+- `exitConditionToLabel(ec)` — formats SL/TP as `ATR(14) × 1.5`, `50 pips`, or `2%`
+- `filterToLabels(filters, sizing)` — compact filter/sizing chip array
+
+Used by the Co-Pilot Story panel and anywhere SIR needs to be rendered as readable text.
+
+### strategyHealth utility
+
+`src/lib/strategyHealth.ts` — computes health badge ratings (Sharpe / Win Rate / Max DD) from a backtest run. Used in the Strategies tab to show colour-coded badges (green/yellow/red) on each strategy card.
+
+### DiagnosisSidebar
+
+`src/components/DiagnosisSidebar.tsx` — single-strategy AI diagnosis panel. Opened via the "Diagnose" button in the Strategies tab toolbar. POSTs to `POST /api/diagnosis/strategy` and renders up to 3 structured fix suggestions with `ir_patch` objects.
+
+### Co-Pilot IR panel
+
+The IR inspector in `copilot/page.tsx` shows:
+- **Story panel** — entry condition cards, exit condition cards, filter/sizing row (uses `strategyLabels`)
+- **Action buttons** — Backtest, Optimize, Superchart (no Refine button)
+  - Buttons are greyed (`opacity-30 pointer-events-none`) until strategy is saved
+  - "Save to enable" hint shown when `!savedId`
+  - Backtest/Optimize links include `?strategy_id=&pair=&timeframe=` params
+
+### Superchart toolbar
+
+Backtest / Optimize / Refine buttons live in the **top toolbar** (`ml-auto` div), not the bottom-right corner. Use standard `border-blue-700` button style with `disabled:opacity-30 disabled:cursor-not-allowed`.
 
 ### fetchWithAuth
 
@@ -224,6 +303,7 @@ All API calls use `fetchWithAuth` from `@/lib/auth` — automatically attaches t
 Used in Backtest tab history list and Strategies tab (both strategy and backtest lists):
 - `checkedIds: Set<string>` state — separate from the highlighted row (`selectedId`)
 - Select-all checkbox uses `ref` callback to set `indeterminate` when partial
+- **Checkbox position:** placed AFTER the trash icon in the toolbar, not at the front
 - Trash button: if `checkedIds.size > 0` → delete all checked; else fall back to single highlighted item
 - Count badge shown on trash icon when `checkedIds.size > 1`
 - Strategy delete has a confirm/cancel flow; backtest delete is immediate
@@ -252,12 +332,13 @@ docker exec forex-ai-platform-timescaledb-1 psql -U forex_user -d forex_db -f /p
 | Table | Purpose |
 |---|---|
 | `strategies` | Strategy records with `ir_json` JSONB |
-| `backtest_runs` | Backtest job metadata |
-| `backtest_results` | Completed run metrics |
-| `trades` | Individual trade records |
+| `backtest_runs` | Backtest job metadata AND completed run metrics (sharpe, max_dd, win_rate, trade_count, etc.) |
+| `trades` | Individual trade records (pnl, r_multiple, mae, mfe, entry_time, exit_time, direction) |
 | `optimization_runs` | Optimization session metadata |
 | `optimization_iterations` | Per-iteration results with `strategy_ir` JSONB |
 | `ohlcv_candles` | TimescaleDB hypertable — 6 pairs × 2 timeframes |
+
+**Note:** There is NO separate `backtest_results` table. `backtest_runs` is the single table for both job metadata and result metrics. All diagnosis/analytics queries use `FROM backtest_runs`.
 
 ### OHLCV coverage
 
@@ -272,9 +353,15 @@ Coverage: April 2021 – April 2026 · Timeframes: `1m`, `1H`
 
 `nginx.conf` must always have top-level `events {}` and `http {}` wrapper blocks. Directives like `limit_req_zone` placed outside these blocks cause nginx to crash at startup.
 
+Nginx resolves upstream hostnames (e.g. `fastapi`) at startup — if nginx restarts while fastapi is down, it fails with `host not found in upstream`. The CI deploy script handles this by recreating backend services first, sleeping 5s, then recreating frontend, then reloading nginx with a restart fallback.
+
 ### Docker Compose — bind mounts
 
 Never add source code bind mounts (`./backend:/app`) to the base `docker-compose.yml`. They go in `docker-compose.dev.yml` only. On the server, containers run as a different UID than the deploy user — bind mounts cause EACCES errors (hit this with Next.js `.next/trace`).
+
+### NEXT_PUBLIC_API_URL — local dev
+
+`docker-compose.dev.yml` sets `NEXT_PUBLIC_API_URL: ""` (empty string) on the nextjs service. This forces the browser to use relative URLs routed through nginx — required because Doppler injects `http://localhost:3000` which is only reachable server-side inside the container network, not from the browser.
 
 ### Docker image tags
 
@@ -290,6 +377,9 @@ echo "IMAGE_PREFIX=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper
 - pytest exit code 5 = no tests collected (not a failure) — handle with `pytest ... || [ $? -eq 5 ]`
 - Staging deploy only fires on `push` to main, not `workflow_dispatch`
 - `npm ci` requires `package-lock.json` in sync — commit both together after any `npm install`
+- **Deploy order matters:** recreate `fastapi celery` first → `sleep 5` → recreate `nextjs` → `nginx -s reload`. Recreating all simultaneously can leave nginx unable to resolve `fastapi` upstream if nginx restarts during the window when fastapi is gone.
+- **Nginx reload fallback:** `nginx -s reload 2>/dev/null || docker compose up -d --force-recreate nginx` — if nginx crashed, bring it back rather than exiting CI with code 1.
+- **Local main diverges after squash merges** — always create new branches from `origin/main` (`git checkout -b feat/foo origin/main`), never from local `main`.
 
 ### Doppler secrets
 

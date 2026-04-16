@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-14 (UI polish sprint — toolbar actions, batch delete, sorting, indicator panel, persistent system prompt)
+**Last updated:** 2026-04-16 (CI deploy fix, docs update — PRs #79–#84)
 
 ---
 
@@ -17,58 +17,18 @@
 
 ---
 
-## UI Polish Sprint (2026-04-14) — pending PR
-
-### Optimization tab
-- Iteration History table: click a row to highlight; toolbar above table activates with **Backtest / Optimize / Refine / Superchart** buttons
-- Clicking any button saves the iteration's `strategy_ir` as a new strategy (`[Opt iter N] PAIR TF`) then navigates to the destination
-- Backend: `strategy_ir` now included in `GET /api/optimization/runs/{id}/iterations` response
-
-### Strategies tab — Strategy list
-- Action buttons (Superchart, Backtest, Refine, View IR, Delete) moved to toolbar above list
-- Sortable by: Name · Pair · TF · Version · Conditions (click to sort, click again to reverse)
-- Batch delete: checkbox per row + select-all + trash shows count badge; confirm/cancel flow preserved
-
-### Strategies tab — Backtests list (middle panel)
-- Action buttons (Superchart, Backtest, Optimize, Refine, Delete) in toolbar above list
-- Select-all checkbox and sort buttons (Date · Sharpe · WR · PnL · Trades) appear below toolbar
-- Batch delete: same pattern as strategy list, immediate (no confirm)
-
-### Backtest tab — Historical Backtests table
-- Toolbar above table: **Superchart / Optimize / Refine / trash** — activate on highlighted row
-- Batch delete: checkbox per row + select-all + count badge on trash
-- Per-row trash icons removed (consolidated into toolbar)
-- Clicking a highlighted row deselects it
-
-### Backtest detail panel (BacktestResultPanel)
-- Replaced action buttons (View IR / Optimize → / Refine →) with **indicator parameter display**
-- Shows entry conditions as `key=value` chips — only params actually set in the IR (no hardcoded defaults)
-- Entry conditions in auto-column grid: 1 col (≤2), 2 col (3–4), 3 col (5+)
-- Exit conditions: SL/TP formatted as `ATR(14) × 1.5`, `50 pips`, or `2%`
-- Filters & sizing on one compact row; session hidden when "all" (default)
-
-### Co-Pilot tab
-- System prompt persisted to `localStorage` (`copilot_system_prompt`) — survives navigation and refresh
-
-### Superchart + Backtest pages
-- Both wrapped in `<Suspense>` to fix Next.js static prerendering error with `useSearchParams()`
-
----
-
-## Current Staging State (2026-04-14)
+## Current Staging State (2026-04-16)
 
 | Item | Value |
 |---|---|
 | URL | https://trading.iogga-co.com |
 | Health | ✅ 200 OK |
-| Services | All 8 up (nginx, fastapi, celery, nextjs, timescaledb, redis, prometheus, grafana) — ClickHouse removed |
-| Strategies in DB | 1 (Golden RSI+EMA, EURUSD 1H) |
-| Backtest runs in DB | 4+ |
-| Trades in DB | 283+ |
+| Last deployed PR | #83 (CI deploy fix) |
+| Services | All 8 up (nginx, fastapi, celery, nextjs, timescaledb, redis, prometheus, grafana) |
 | OANDA mode | `practice` (demo account, account 001-001-21125823-001) |
 | `LIVE_TRADING_ENABLED` | `false` |
-| Anthropic API | ✅ Key updated — credits available |
-| Voyage AI | ✅ Payment method added — 300 RPM / 1M TPM |
+| Anthropic API | ✅ Key active — credits available |
+| Voyage AI | ✅ 300 RPM / 1M TPM |
 
 ### OHLCV Data Coverage
 
@@ -561,10 +521,68 @@ Root cause chain (each PR fixed one layer):
 
 ---
 
+## Superchart + Optimization Toolbar (2026-04-12 → 2026-04-14)
+
+| PR | Change |
+|---|---|
+| #65–#74 | SSE verification, stability fixes, and minor UX polish (post #64 follow-ups) ✅ merged |
+| #75 | feat: Superchart page — full-screen candlestick chart with strategy overlay, draft IR editing, save-as-new ✅ merged |
+| #76 | feat: Optimization iteration toolbar — Backtest / Optimize / Refine / Superchart buttons; `strategy_ir` included in iterations response; `saveIterAndNavigate()` pattern ✅ merged |
+| #77 | feat: UI polish sprint — Strategies tab toolbar + batch delete + sorting; Backtest tab toolbar + batch delete; BacktestResultPanel indicator chips (replaces action buttons); Co-Pilot system prompt persisted to localStorage; Superchart + Backtest pages wrapped in `<Suspense>` ✅ merged |
+| #78 | docs: CLAUDE.md — `strategy_ir` field, `RunSummary.strategy_id`, `saveIterAndNavigate`, BacktestResultPanel role ✅ merged |
+
+### UI Polish Sprint key design decisions (PR #77)
+
+**Strategies tab — strategy list:** action buttons (Superchart, Backtest, Refine, View IR, Delete) moved to toolbar above list; sortable by Name · Pair · TF · Version · Conditions; batch delete with confirm/cancel flow
+
+**Strategies tab — backtests list:** action buttons in toolbar; sort by Date · Sharpe · WR · PnL · Trades; batch delete immediate (no confirm)
+
+**Backtest tab:** toolbar above history table (Superchart / Optimize / Refine / trash); batch delete; per-row trash icons removed
+
+**BacktestResultPanel:** action buttons replaced with indicator parameter display — entry conditions as `key=value` chips in auto-column grid (1/2/3 cols by count), SL/TP formatted as `ATR(14) × 1.5` / `50 pips` / `2%`, filters + sizing compact row
+
+---
+
+## Strategy UX + AI Diagnosis (2026-04-14 → 2026-04-16)
+
+| PR | Change |
+|---|---|
+| #79 | feat: Strategy UX enhancements — condition cards with icons, health badges (Sharpe/WR/DD), Diagnose Strategy button → AI weakness analysis sidebar ✅ merged |
+| #80 | feat: multi-trade pattern analysis — checkbox selection per trade, outlier detection (2σ below mean loss), TradeAnalysisSidebar with AI two-step fetch, preset selectors (losers/winners/longs/shorts/outliers/clear) ✅ merged |
+| #81 | fix: `backtest_runs` table name in all diagnosis queries (was wrongly `backtest_results` — caused 500 on all diagnosis endpoints); feat: Co-Pilot IR panel — Story panel (condition cards via `strategyLabels`) + Backtest / Optimize / Superchart action buttons (no Refine) ✅ merged |
+| #82 | feat: Superchart toolbar — Backtest / Optimize / Refine buttons moved from bottom-right to top toolbar with standard `border-blue-700` style; select-all checkbox moved after trash icon in Strategies/Backtests toolbars ✅ merged |
+| #83 | fix: CI deploy order — recreate `fastapi celery` first, `sleep 5`, recreate `nextjs`; nginx restart fallback (`nginx -s reload || docker compose up -d --force-recreate nginx`) ✅ merged |
+| #84 | docs: CLAUDE.md comprehensive update — all patterns from PRs #79–#83, corrected `backtest_runs` table, added diagnosis endpoints, trade analysis, strategyLabels, Co-Pilot IR panel, Superchart toolbar, CI deploy order (open) |
+
+### Multi-trade analysis design (PR #80)
+
+**Backend** — two new endpoints on `/api/diagnosis`:
+- `POST /trades/stats` — selection vs population stats (win rate, avg PnL/R, duration, MAE/MFE, long/short breakdown, by_hour, by_dow)
+- `POST /trades/analyze` — takes pre-computed stats dict; calls `ai/trade_analysis.py` → Claude; returns `{headline, patterns, verdict, recommendation}`
+
+**Frontend** — `TradeAnalysisSidebar.tsx`:
+- Two-step fetch on mount: stats first (rendered immediately), then AI analysis
+- Outlier threshold: trades with loss > 2σ below mean loss get ⚠ icon
+- Verdict values: `structural | edge_decay | outlier | inconclusive`
+- Strength values: `strong | moderate | weak`
+
+**Key fix (PR #80):** `toggleTrade(id)` must use `if/else` not ternary — `next.has(id) ? next.delete(id) : next.add(id)` is an unused-expression lint error.
+
+### Co-Pilot IR panel (PR #81)
+
+- Story panel renders entry conditions via `conditionToLabel()`, exit via `exitConditionToLabel()`, filters/sizing via `filterToLabels()` from `src/lib/strategyLabels.ts`
+- Action buttons: Backtest / Optimize / Superchart (no Refine)
+- Buttons are `opacity-30 pointer-events-none` until strategy is saved (`savedId` state)
+
+### CI deploy race condition (PR #83)
+
+Nginx resolves upstream DNS at startup. If nginx restarts while fastapi is temporarily stopped during `--force-recreate`, it fails with `host not found in upstream "fastapi"`. Fix: sequential recreation — backend first, then frontend, then nginx reload with restart fallback.
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Verify SSE fix (PR #64) on staging | High | Start an optimization run; confirm no `ERR_INCOMPLETE_CHUNKED_ENCODING` in browser console |
-| Remove debug `console.log` from `page.tsx` | Low | `[chart] oscillators:` log from PR #47 still present |
-| Phase 4 — Live Trading | Next | All 6 pairs have full data. Optimization tab complete. Ready to begin. |
+| Merge PR #84 (CLAUDE.md docs) | Low | CI green, awaiting merge |
+| Phase 4 — Live Trading | Next | All 6 pairs loaded (Apr 2021–Apr 2026). All Phase 3 features shipped. Ready to begin. |
