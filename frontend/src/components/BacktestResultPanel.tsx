@@ -803,9 +803,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
           value={`$${m.total_pnl.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
           sub={m.total_pnl >= 0 ? "profit" : "loss"}
         />
-        {profitFactor !== null && (
-          <MetricCard label="Profit Factor" value={fmt(profitFactor)} />
-        )}
+        <MetricCard label="Profit Factor" value={fmt(profitFactor)} />
       </div>
 
       {/* Candlestick chart */}

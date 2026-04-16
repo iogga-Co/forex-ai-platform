@@ -19,6 +19,7 @@ services:
       - ./backend:/app
 
   nextjs:
+    command: npm run dev
     environment:
       # Empty so all browser-side API calls use relative paths → nginx on port 80.
       # Doppler injects http://localhost:3000 which is unreachable from the browser.

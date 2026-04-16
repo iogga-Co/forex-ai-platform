@@ -396,27 +396,27 @@ function BacktestPageInner() {
                     </button>
                   );
                 })()}
+                {history.length > 0 && (
+                  <input
+                    type="checkbox"
+                    title="Select all"
+                    checked={checkedIds.size === history.length}
+                    ref={(el) => {
+                      if (el) el.indeterminate = checkedIds.size > 0 && checkedIds.size < history.length;
+                    }}
+                    onChange={(e) => {
+                      if (e.target.checked) setCheckedIds(new Set(history.map((r) => r.id)));
+                      else setCheckedIds(new Set());
+                    }}
+                    className="h-3 w-3 accent-blue-500 cursor-pointer"
+                  />
+                )}
               </div>
             );
           })()}
 
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              {history.length > 0 && (
-                <input
-                  type="checkbox"
-                  title="Select all"
-                  checked={checkedIds.size === history.length}
-                  ref={(el) => {
-                    if (el) el.indeterminate = checkedIds.size > 0 && checkedIds.size < history.length;
-                  }}
-                  onChange={(e) => {
-                    if (e.target.checked) setCheckedIds(new Set(history.map((r) => r.id)));
-                    else setCheckedIds(new Set());
-                  }}
-                  className="h-3 w-3 accent-blue-500 cursor-pointer"
-                />
-              )}
               <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Recent runs{checkedIds.size > 0 ? ` · ${checkedIds.size} selected` : ""}
               </h2>
