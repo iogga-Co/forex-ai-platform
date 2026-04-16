@@ -22,10 +22,11 @@ export default function UpcomingEventsBanner() {
     const tomorrowStr = new Date(now.getTime() + 24 * 60 * 60 * 1000)
       .toISOString().slice(0, 10);
     try {
-      const data = await fetchWithAuth(
+      const res = await fetchWithAuth(
         `/api/news/calendar?from=${todayStr}&to=${tomorrowStr}&impact=high`
       );
-      const upcoming = (data.events as NewsEvent[]).filter(e => !e.is_past);
+      const data = await res.json();
+      const upcoming = (data.events as NewsEvent[]).filter((e: NewsEvent) => !e.is_past);
       setEvents(upcoming);
     } catch {
       // silently ignore — banner is best-effort

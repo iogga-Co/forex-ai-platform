@@ -50,7 +50,8 @@ function NewsPageInner() {
         currencies: currencies.join(","),
         impact,
       });
-      const data = await fetchWithAuth(`/api/news/calendar?${params.toString()}`);
+      const res = await fetchWithAuth(`/api/news/calendar?${params.toString()}`);
+      const data = await res.json();
       setEvents(data.events ?? []);
       setStale(data.stale ?? false);
     } catch (e: unknown) {

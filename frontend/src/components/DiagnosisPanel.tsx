@@ -58,7 +58,7 @@ export default function DiagnosisPanel({
       setLoading(true);
       setError(null);
       try {
-        const data = await fetchWithAuth("/api/diagnosis/period", {
+        const res = await fetchWithAuth("/api/diagnosis/period", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -68,6 +68,7 @@ export default function DiagnosisPanel({
             include_news: true,
           }),
         });
+        const data = await res.json();
         setResult(data as DiagnosisResult);
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Analysis failed. Please try again.");
