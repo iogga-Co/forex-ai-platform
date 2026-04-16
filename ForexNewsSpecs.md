@@ -21,12 +21,34 @@ As a trader I want a dedicated news tab that shows scheduled high-impact economi
 - **Pair correlation chip**: for each event, chips showing which of the 6 traded pairs are directly affected
 
 ### Data source — Phase 1
-- **ForexFactory calendar API** (unofficial JSON endpoint) or **Investing.com** scrape — pull and cache in Redis (TTL 1 h)
+- **ForexFactory calendar API** (unofficial JSON endpoint) — pull and cache in Redis (TTL 1 h per ISO week)
 - Backend endpoint: `GET /api/news/calendar?from=&to=&currencies=&impact=`
 - Store fetched events in a `news_events` Postgres table for historical correlation queries (see Phase 2)
 
+> **⚠ Historical data limitation:** ForexFactory only exposes three weekly feeds (`lastweek`, `thisweek`,
+> `nextweek`). There is no historical archive endpoint. The `news_events` table will only accumulate data
+> from the day the feature is deployed — it will **not** automatically backfill to April 2021 (the start
+> of OHLCV coverage). This means Phase 2 news correlation against historical backtests requires one of the
+> options below.
+
+### Historical backfill (required for Phase 2 correlation)
+
+The OHLCV data covers April 2021 → present. To correlate past backtest trades against news events, one
+of these approaches is needed before Phase 2:
+
+| Option | Coverage | Cost | Effort |
+|---|---|---|---|
+| **One-time CSV import** (recommended) | 2010–present | Free | Low — write `backend/scripts/backfill_news.py` to upsert a CSV downloaded from Investing.com economic calendar export | 
+| **Tradermade Economic Calendar API** | ~2015–present | ~$50–200/mo | Medium — replace ForexFactory fetch in `news.py` |
+| **Polygon.io News** | Historical | Paid | Medium — different data model, requires mapping |
+
+**Recommended path:** download a historical CSV from Investing.com's economic calendar export (free,
+covers 2010–present) and write a one-time backfill script. ForexFactory continues as the live forward
+feed. The existing `news_events` schema and upsert logic already support this — no table changes needed.
+
 ### Data source — Phase 2
-- Replace scrape with a paid, reliable feed (e.g., Tradermade Economic Calendar API, or Polygon.io news)
+- One-time historical backfill (see above) to populate `news_events` from April 2021 onwards
+- Optionally replace ForexFactory with a paid, reliable feed (e.g., Tradermade Economic Calendar API) for higher reliability and richer data
 - Add full news articles / headline feed alongside calendar events
 
 ### `news_events` table schema
