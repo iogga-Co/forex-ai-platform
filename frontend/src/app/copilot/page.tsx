@@ -142,7 +142,6 @@ function SirInspector({
   const actionButtons = [
     { label: "Backtest",   href: btParams ? `/backtest${btParams}` : null },
     { label: "Optimize",   href: btParams ? `/optimization${btParams}` : null },
-    { label: "Refine",     href: btParams ? `/copilot?strategy_id=${savedId}` : null },
     { label: "Superchart", href: savedId  ? `/superchart?strategy_id=${savedId}` : null },
   ];
 
