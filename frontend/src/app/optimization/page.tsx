@@ -134,6 +134,9 @@ function IterationRow({
       <td className="px-3 py-2 text-right">{fmtPct(iter.win_rate)}</td>
       <td className="px-3 py-2 text-right">{fmtPct(iter.max_dd)}</td>
       <td className="px-3 py-2 text-right">{iter.trade_count ?? "—"}</td>
+      <td className={`px-3 py-2 text-right font-medium ${iter.total_pnl == null ? "text-zinc-400" : iter.total_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+        {iter.total_pnl == null ? "—" : `${iter.total_pnl >= 0 ? "+" : ""}$${iter.total_pnl.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+      </td>
       <td className="px-3 py-2 text-zinc-400 text-xs truncate max-w-xs">{iter.ai_changes ?? "—"}</td>
     </tr>
   );
@@ -179,7 +182,7 @@ function OptimizationPageInner() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notLoggedIn, setNotLoggedIn] = useState(false);
-  const [sortCol, setSortCol] = useState<"iteration" | "sharpe" | "win_rate" | "max_dd" | "trade_count">("iteration");
+  const [sortCol, setSortCol] = useState<"iteration" | "sharpe" | "win_rate" | "max_dd" | "trade_count" | "total_pnl">("iteration");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const esRef = useRef<EventSource | null>(null);
@@ -927,10 +930,10 @@ function OptimizationPageInner() {
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="text-zinc-400 border-b border-zinc-700">
-                          {(["iteration", "sharpe", "win_rate", "max_dd", "trade_count"] as const).map((col) => {
+                          {(["iteration", "sharpe", "win_rate", "max_dd", "trade_count", "total_pnl"] as const).map((col) => {
                             const labels: Record<string, string> = {
                               iteration: "Iter", sharpe: "Sharpe", win_rate: "Win Rate",
-                              max_dd: "Max DD", trade_count: "Trades",
+                              max_dd: "Max DD", trade_count: "Trades", total_pnl: "PnL",
                             };
                             const active = sortCol === col;
                             return (
