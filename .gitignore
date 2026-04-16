@@ -71,6 +71,7 @@ docker-compose.override.yml
 data/
 !backend/data/
 !backend/data/**
+backend/data/__pycache__/
 *.sql.gz
 *.dump
 *.csv
@@ -89,6 +90,7 @@ logs/
 # =============================================================================
 # IDE & OS
 # =============================================================================
+.claude/
 .vscode/
 .idea/
 *.swp
