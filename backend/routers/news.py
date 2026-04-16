@@ -206,12 +206,10 @@ async def get_calendar(
     # Fetch & cache each needed week
     r = aioredis.from_url(settings.redis_url, decode_responses=True)
     all_events: list[dict] = []
-    stale = False
+    thisweek_failed = False
 
     try:
         for week_label in weeks_needed:
-            # Build a cache key based on the actual Monday of that week's label
-            # We'll use the label string since we don't have the exact date
             cache_key = f"news:ff:{week_label}"
             cached = await r.get(cache_key)
 
@@ -222,7 +220,11 @@ async def get_calendar(
                 if raw_list:
                     await r.setex(cache_key, CACHE_TTL, json.dumps(raw_list))
                 else:
-                    stale = True
+                    # lastweek/nextweek returning 404 is normal — ForexFactory
+                    # doesn't always publish those feeds. Only flag stale if
+                    # thisweek itself fails.
+                    if week_label == "thisweek":
+                        thisweek_failed = True
 
             for item in raw_list:
                 event = _raw_to_event(item)
@@ -230,6 +232,8 @@ async def get_calendar(
                     all_events.append(event)
     finally:
         await r.aclose()
+
+    stale = thisweek_failed
 
     # Persist to DB (upsert) in background — don't block the response
     if all_events:
