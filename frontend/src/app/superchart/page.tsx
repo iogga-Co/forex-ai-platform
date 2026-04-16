@@ -654,11 +654,36 @@ function SuperchartPageInner() {
           <span className="text-xs text-zinc-600">{candles.length.toLocaleString()} bars</span>
         )}
         {isModified && (
-          <span className="ml-auto flex items-center gap-1 text-xs text-amber-400 font-medium">
+          <span className="flex items-center gap-1 text-xs text-amber-400 font-medium">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-400 inline-block" />
             Modified
           </span>
         )}
+
+        {/* Action buttons */}
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={() => handleAction("backtest")}
+            disabled={!selectedStratId || savingDraft}
+            className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            Backtest
+          </button>
+          <button
+            onClick={() => handleAction("optimize")}
+            disabled={!selectedStratId || savingDraft}
+            className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            Optimize
+          </button>
+          <button
+            onClick={() => handleAction("refine")}
+            disabled={!selectedStratId || savingDraft}
+            className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            Refine
+          </button>
+        </div>
       </div>
 
       {/* ------------------------------------------------------------------ */}
@@ -785,38 +810,12 @@ function SuperchartPageInner() {
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Action buttons */}
-          <div className="p-3 border-t border-zinc-800 space-y-2 flex-shrink-0">
-            {draftError && (
-              <p className="text-xs text-red-400">{draftError}</p>
-            )}
-            {isModified && (
-              <p className="text-[10px] text-amber-400">
-                Modified — will auto-save as draft before sending.
-              </p>
-            )}
-            <ActionButton
-              label="▶  Run Backtest"
-              onClick={() => handleAction("backtest")}
-              disabled={!selectedStratId || savingDraft}
-              color="blue"
-            />
-            <ActionButton
-              label="⚡  Optimize"
-              onClick={() => handleAction("optimize")}
-              disabled={!selectedStratId || savingDraft}
-              color="purple"
-            />
-            <ActionButton
-              label="✨  Refine Strategy"
-              onClick={() => handleAction("refine")}
-              disabled={!selectedStratId || savingDraft}
-              color="zinc"
-            />
-            {savingDraft && (
-              <p className="text-[10px] text-zinc-500 text-center animate-pulse">Saving draft…</p>
-            )}
-          </div>
+          {draftError && (
+            <p className="px-3 pb-2 text-xs text-red-400">{draftError}</p>
+          )}
+          {savingDraft && (
+            <p className="px-3 pb-2 text-[10px] text-zinc-500 text-center animate-pulse">Saving draft…</p>
+          )}
         </div>
       </div>
     </div>

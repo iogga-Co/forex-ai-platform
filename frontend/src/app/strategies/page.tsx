@@ -388,19 +388,6 @@ export default function StrategiesPage() {
           {tab === "active" && (
             <div className="space-y-2">
               <div className="flex items-center gap-1 flex-nowrap">
-                <input
-                  type="checkbox"
-                  title="Select all"
-                  checked={active.length > 0 && checkedStrategyIds.size === active.length}
-                  ref={(el) => {
-                    if (el) el.indeterminate = checkedStrategyIds.size > 0 && checkedStrategyIds.size < active.length;
-                  }}
-                  onChange={(e) => {
-                    if (e.target.checked) setCheckedStrategyIds(new Set(active.map((s) => s.id)));
-                    else setCheckedStrategyIds(new Set());
-                  }}
-                  className="h-3 w-3 accent-blue-500 cursor-pointer mr-0.5"
-                />
                 <Link
                   href={selectedStrategy ? `/superchart?strategy_id=${selectedStrategy.id}` : "#"}
                   onClick={(e) => { if (!selectedStrategy) e.preventDefault(); }}
@@ -465,10 +452,20 @@ export default function StrategiesPage() {
                     )}
                   </button>
                 )}
+                <input
+                  type="checkbox"
+                  title="Select all"
+                  checked={active.length > 0 && checkedStrategyIds.size === active.length}
+                  ref={(el) => {
+                    if (el) el.indeterminate = checkedStrategyIds.size > 0 && checkedStrategyIds.size < active.length;
+                  }}
+                  onChange={(e) => {
+                    if (e.target.checked) setCheckedStrategyIds(new Set(active.map((s) => s.id)));
+                    else setCheckedStrategyIds(new Set());
+                  }}
+                  className="h-3 w-3 accent-blue-500 cursor-pointer ml-0.5"
+                />
               </div>
-              {checkedStrategyIds.size > 0 && (
-                <p className="text-[10px] text-gray-500">{checkedStrategyIds.size} selected</p>
-              )}
               {/* Sort bar */}
               <div className="flex items-center gap-1 flex-wrap">
                 {(Object.keys(STRATEGY_SORT_LABELS) as StrategySortKey[]).map((k) => {
@@ -614,25 +611,27 @@ export default function StrategiesPage() {
                       <span className="text-[10px] font-mono">{deleteIds.size}</span>
                     )}
                   </button>
+                  {backtests.length > 0 && (
+                    <input
+                      type="checkbox"
+                      title="Select all"
+                      checked={checkedBacktestIds.size === backtests.length}
+                      ref={(el) => {
+                        if (el) el.indeterminate = checkedBacktestIds.size > 0 && checkedBacktestIds.size < backtests.length;
+                      }}
+                      onChange={(e) => {
+                        if (e.target.checked) setCheckedBacktestIds(new Set(backtests.map((b) => b.id)));
+                        else setCheckedBacktestIds(new Set());
+                      }}
+                      className="h-3 w-3 accent-blue-500 cursor-pointer ml-0.5"
+                    />
+                  )}
                 </div>
               );
             })()}
-            {backtests.length > 0 && (
+            {backtests.length > 1 && (
               <div className="flex items-center gap-1.5 flex-wrap">
-                <input
-                  type="checkbox"
-                  title="Select all"
-                  checked={checkedBacktestIds.size === backtests.length}
-                  ref={(el) => {
-                    if (el) el.indeterminate = checkedBacktestIds.size > 0 && checkedBacktestIds.size < backtests.length;
-                  }}
-                  onChange={(e) => {
-                    if (e.target.checked) setCheckedBacktestIds(new Set(backtests.map((b) => b.id)));
-                    else setCheckedBacktestIds(new Set());
-                  }}
-                  className="h-3 w-3 accent-blue-500 cursor-pointer"
-                />
-                {backtests.length > 1 && (Object.keys(BACKTEST_SORT_LABELS) as BacktestSortKey[]).map((k) => {
+                {(Object.keys(BACKTEST_SORT_LABELS) as BacktestSortKey[]).map((k) => {
                   const active_ = backtestSortKey === k;
                   return (
                     <button
