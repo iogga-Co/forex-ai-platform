@@ -268,6 +268,14 @@ Verdict badge colours: `structural` = orange, `edge_decay` = red, `outlier` = bl
 
 Used by the Co-Pilot Story panel and anywhere SIR needs to be rendered as readable text.
 
+### strategyHealth utility
+
+`src/lib/strategyHealth.ts` — computes health badge ratings (Sharpe / Win Rate / Max DD) from a backtest run. Used in the Strategies tab to show colour-coded badges (green/yellow/red) on each strategy card.
+
+### DiagnosisSidebar
+
+`src/components/DiagnosisSidebar.tsx` — single-strategy AI diagnosis panel. Opened via the "Diagnose" button in the Strategies tab toolbar. POSTs to `POST /api/diagnosis/strategy` and renders up to 3 structured fix suggestions with `ir_patch` objects.
+
 ### Co-Pilot IR panel
 
 The IR inspector in `copilot/page.tsx` shows:
