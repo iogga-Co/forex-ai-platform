@@ -292,12 +292,14 @@ jobs:
             cd /opt/forex-ai-platform
             git pull origin main
             doppler run -- docker compose build fastapi celery nextjs
-            # --force-recreate ensures containers are replaced even if Docker
-            # Compose thinks they are already up-to-date (name-agnostic, unlike
-            # docker rm -f which silently no-ops if names differ).
-            doppler run -- docker compose up -d --remove-orphans --force-recreate fastapi celery nextjs
-            # Reload nginx to flush stale upstream IPs after container rebuild
-            docker exec forex-ai-platform-nginx-1 nginx -s reload
+            # Recreate backend first so fastapi is available before nginx reloads
+            doppler run -- docker compose up -d --remove-orphans --force-recreate fastapi celery
+            # Brief wait for fastapi to register in Docker DNS
+            sleep 5
+            doppler run -- docker compose up -d --force-recreate nextjs
+            # Reload nginx; restart it if it crashed (e.g. fastapi was briefly gone)
+            docker exec forex-ai-platform-nginx-1 nginx -s reload 2>/dev/null || \
+              doppler run -- docker compose up -d --force-recreate nginx
 
       - name: Smoke test — health endpoint
         if: steps.secrets-check.outputs.available == 'true'
@@ -362,8 +364,9 @@ jobs:
             # NOTE: LIVE_TRADING_ENABLED flag state in Doppler is never
             # modified here. Enabling live trading is always a separate,
             # explicit operator action.
-            # Reload nginx to flush stale upstream IPs after container rebuild
-            docker exec forex-ai-platform-nginx-1 nginx -s reload
+            # Reload nginx; restart it if it crashed (e.g. fastapi was briefly gone)
+            docker exec forex-ai-platform-nginx-1 nginx -s reload 2>/dev/null || \
+              doppler run -- docker compose up -d --force-recreate nginx
 
       - name: Smoke test — health endpoint
         run: |
