@@ -4,6 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { fetchWithAuth } from "@/lib/auth";
+import {
+  conditionToLabel,
+  exitConditionToLabel,
+  filterToLabels,
+  type EntryCondition,
+  type ExitCondition,
+} from "@/lib/strategyLabels";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,10 +21,13 @@ interface Turn {
 }
 
 interface SirProposal {
-  entry_conditions: unknown[];
-  exit_conditions: unknown;
-  filters?: unknown;
-  position_sizing?: unknown;
+  entry_conditions?: EntryCondition[];
+  exit_conditions?: {
+    stop_loss?:   ExitCondition;
+    take_profit?: ExitCondition;
+  };
+  filters?: { exclude_days?: string[]; session?: string };
+  position_sizing?: { risk_per_trade_pct?: number; max_size_units?: number };
   metadata?: { description?: string; version?: number };
 }
 
@@ -91,6 +101,7 @@ function SirInspector({
   const [description, setDescription] = useState(sir.metadata?.description ?? "");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
+  const [savedId, setSavedId] = useState<string | null>(null);
 
   async function handleSave() {
     if (!description.trim()) return;
@@ -115,6 +126,7 @@ function SirInspector({
       }
 
       const saved = (await res.json()) as { id: string };
+      setSavedId(saved.id);
       setSaveState("saved");
       onSaved(saved.id);
     } catch (err) {
@@ -123,8 +135,26 @@ function SirInspector({
     }
   }
 
+  // Build action button URLs (only valid after save)
+  const btParams = savedId
+    ? `?strategy_id=${savedId}&pair=${pair.toUpperCase().replace("/", "")}&timeframe=${timeframe}`
+    : null;
+  const actionButtons = [
+    { label: "Backtest",   href: btParams ? `/backtest${btParams}` : null },
+    { label: "Optimize",   href: btParams ? `/optimization${btParams}` : null },
+    { label: "Superchart", href: savedId  ? `/superchart?strategy_id=${savedId}` : null },
+  ];
+
+  // Build Story cards from SIR
+  const entryConditions = sir.entry_conditions ?? [];
+  const sl  = sir.exit_conditions?.stop_loss;
+  const tp  = sir.exit_conditions?.take_profit;
+  const filterLabels = sir.filters ? filterToLabels(sir.filters) : [];
+  const sizing = sir.position_sizing;
+
   return (
     <div className="flex flex-col h-full">
+      {/* Header */}
       <div className="px-4 py-3 border-b border-surface-border">
         <h2 className="text-sm font-semibold text-gray-100">Strategy IR Proposal</h2>
         <p className="text-xs text-gray-500 mt-0.5">
@@ -132,12 +162,91 @@ function SirInspector({
         </p>
       </div>
 
+      {/* Action buttons */}
+      <div className="px-4 py-2 border-b border-surface-border flex gap-1.5 flex-wrap shrink-0">
+        {actionButtons.map(({ label, href }) =>
+          href ? (
+            <Link
+              key={label}
+              href={href}
+              className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
+            >
+              {label}
+            </Link>
+          ) : (
+            <span
+              key={label}
+              className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 opacity-30 pointer-events-none"
+            >
+              {label}
+            </span>
+          )
+        )}
+        {!savedId && (
+          <span className="text-[10px] text-slate-600 self-center ml-1">Save to enable</span>
+        )}
+      </div>
+
+      {/* Story panel */}
+      {entryConditions.length > 0 && (
+        <div className="px-4 py-3 border-b border-surface-border shrink-0 space-y-2">
+          <p className="text-[10px] uppercase tracking-widest text-slate-500">Story</p>
+
+          {/* Entry conditions */}
+          <div className="space-y-1">
+            <p className="text-[10px] uppercase tracking-widest text-slate-600">Entry</p>
+            <div className="flex flex-col gap-1">
+              {entryConditions.map((c, i) => (
+                <div
+                  key={i}
+                  className="rounded-md border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-200 leading-snug"
+                >
+                  {conditionToLabel(c)}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Exit conditions */}
+          {(sl || tp) && (
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase tracking-widest text-slate-600">Exit</p>
+              <div className="flex flex-col gap-1">
+                {sl && (
+                  <div className="rounded-md border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-200 leading-snug">
+                    {exitConditionToLabel("Stop Loss", sl)}
+                  </div>
+                )}
+                {tp && (
+                  <div className="rounded-md border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-200 leading-snug">
+                    {exitConditionToLabel("Take Profit", tp)}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Filters + sizing compact row */}
+          {(filterLabels.length > 0 || sizing) && (
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              {[
+                ...filterLabels,
+                sizing?.risk_per_trade_pct != null ? `risk ${sizing.risk_per_trade_pct}%` : null,
+                sizing?.max_size_units != null ? `size ${sizing.max_size_units.toLocaleString()}` : null,
+              ].filter(Boolean).join(" · ")}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* IR JSON */}
       <div className="flex-1 overflow-y-auto p-4">
         <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono">
           {JSON.stringify(sir, null, 2)}
         </pre>
       </div>
 
+      {/* Save / discard controls */}
       <div className="px-4 py-3 border-t border-surface-border space-y-2">
         <input
           value={description}

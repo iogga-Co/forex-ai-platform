@@ -54,7 +54,7 @@ async def diagnose_strategy_endpoint(
             SELECT br.pair, br.timeframe, br.strategy_id,
                    br.sharpe, br.max_dd, br.win_rate, br.trade_count,
                    s.description
-            FROM   backtest_results br
+            FROM   backtest_runs br
             JOIN   strategies s ON s.id = br.strategy_id
             WHERE  br.id = $1
             """,
@@ -200,7 +200,7 @@ async def trade_stats_endpoint(
         run = await conn.fetchrow(
             """
             SELECT br.pair, br.timeframe, s.description
-            FROM   backtest_results br
+            FROM   backtest_runs br
             JOIN   strategies s ON s.id = br.strategy_id
             WHERE  br.id = $1
             """,
@@ -302,7 +302,7 @@ async def trade_analyze_endpoint(
         run = await conn.fetchrow(
             """
             SELECT br.pair, br.timeframe, s.description
-            FROM   backtest_results br
+            FROM   backtest_runs br
             JOIN   strategies s ON s.id = br.strategy_id
             WHERE  br.id = $1
             """,
