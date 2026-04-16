@@ -67,6 +67,14 @@ Reference spec: `ForexNewsSpecs.md`
 
 ### Data
 
+> **Note:** ForexFactory only provides `lastweek` / `thisweek` / `nextweek` feeds — no historical
+> archive. The `news_events` table accumulates forward from deploy date only. A historical backfill
+> is required before news correlation against past backtests will work. See `ForexNewsSpecs.md`
+> "Historical backfill" section for options.
+
+- [ ] **P2-0** *(prerequisite)* Historical backfill — download Investing.com economic calendar CSV
+      (free, covers 2010–present) and write `backend/scripts/backfill_news.py` to upsert into
+      `news_events`. Run once on staging to populate April 2021 → present.
 - [ ] **P2-1** Evaluate and integrate a reliable economic calendar API (Tradermade, Polygon.io, or equivalent)
 - [ ] **P2-2** Set up a scheduled Celery beat task to refresh `news_events` table every hour
 - [ ] **P2-3** Add `FOREX_NEWS_API_KEY` to Doppler (development + staging configs)
