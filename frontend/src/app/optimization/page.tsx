@@ -14,6 +14,46 @@ interface Strategy {
   description: string;
   pair: string;
   timeframe: string;
+  ir_json: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// IR param helpers
+// ---------------------------------------------------------------------------
+interface ParamDef { key: string; label: string; step: number; min: number; isInt?: boolean }
+
+function getConditionParams(cond: Record<string, unknown>): ParamDef[] {
+  switch (cond.indicator as string) {
+    case "MACD":
+      return [
+        { key: "fast",          label: "fast", step: 1, min: 1, isInt: true },
+        { key: "slow",          label: "slow", step: 1, min: 1, isInt: true },
+        { key: "signal_period", label: "sig",  step: 1, min: 1, isInt: true },
+      ];
+    case "BB":
+      return [
+        { key: "period",  label: "period", step: 1,   min: 2, isInt: true },
+        { key: "std_dev", label: "σ",      step: 0.1, min: 0.1 },
+      ];
+    case "STOCH":
+      return [
+        { key: "k_smooth", label: "K", step: 1, min: 1, isInt: true },
+        { key: "d_period", label: "D", step: 1, min: 1, isInt: true },
+      ];
+    default: {
+      const params: ParamDef[] = [{ key: "period", label: "period", step: 1, min: 1, isInt: true }];
+      if ("value" in cond) params.push({ key: "value", label: "val", step: 0.1, min: 0 });
+      return params;
+    }
+  }
+}
+
+function getExitParams(cond: Record<string, unknown>): ParamDef[] {
+  if (cond.type === "atr") return [
+    { key: "period",     label: "period", step: 1,   min: 1, isInt: true },
+    { key: "multiplier", label: "mult",   step: 0.1, min: 0.1 },
+  ];
+  return [{ key: "value", label: cond.type === "pct" ? "%" : "pips", step: cond.type === "pct" ? 0.1 : 1, min: 0.1 }];
 }
 
 interface OptRun {
@@ -184,6 +224,8 @@ function OptimizationPageInner() {
   const [notLoggedIn, setNotLoggedIn] = useState(false);
   const [sortCol, setSortCol] = useState<"iteration" | "sharpe" | "win_rate" | "max_dd" | "trade_count" | "total_pnl">("iteration");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [editedIr, setEditedIr] = useState<Record<string, unknown> | null>(null);
+  const [irDirty, setIrDirty] = useState(false);
 
   const esRef = useRef<EventSource | null>(null);
 
@@ -229,6 +271,50 @@ function OptimizationPageInner() {
       }
     });
   }, []);
+
+  // When selected strategy changes, load its IR into the editable state
+  useEffect(() => {
+    if (!form.strategy_id) { setEditedIr(null); setIrDirty(false); return; }
+    const s = strategies.find((s) => s.id === form.strategy_id);
+    if (s?.ir_json) {
+      setEditedIr(JSON.parse(JSON.stringify(s.ir_json)));
+      setIrDirty(false);
+    }
+  }, [form.strategy_id, strategies]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function updateEntryParam(idx: number, key: string, value: number) {
+    setEditedIr((prev) => {
+      if (!prev) return prev;
+      const next = JSON.parse(JSON.stringify(prev));
+      (next.entry_conditions as Record<string, unknown>[])[idx][key] = value;
+      return next;
+    });
+    setIrDirty(true);
+  }
+
+  function updateExitParam(side: "stop_loss" | "take_profit", key: string, value: number) {
+    setEditedIr((prev) => {
+      if (!prev) return prev;
+      const next = JSON.parse(JSON.stringify(prev));
+      if (!next.exit_conditions) next.exit_conditions = {};
+      (next.exit_conditions as Record<string, unknown>)[side] = {
+        ...((next.exit_conditions as Record<string, unknown>)[side] as object ?? {}),
+        [key]: value,
+      };
+      return next;
+    });
+    setIrDirty(true);
+  }
+
+  function updateSizingParam(key: string, value: number) {
+    setEditedIr((prev) => {
+      if (!prev) return prev;
+      const next = JSON.parse(JSON.stringify(prev));
+      next.position_sizing = { ...(next.position_sizing as object ?? {}), [key]: value };
+      return next;
+    });
+    setIrDirty(true);
+  }
 
   async function loadStrategies() {
     try {
@@ -395,8 +481,28 @@ function OptimizationPageInner() {
     setError(null);
     setSubmitting(true);
     try {
+      // If the user edited the IR, save it as a new strategy first
+      let strategyId = form.strategy_id;
+      if (irDirty && editedIr) {
+        const baseStrategy = strategies.find((s) => s.id === form.strategy_id);
+        const seedRes = await fetchWithAuth(`${API_BASE}/api/strategies`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ir_json: editedIr,
+            description: `[Opt seed] ${baseStrategy?.description ?? form.strategy_id.slice(0, 8)}`,
+            pair: form.pair,
+            timeframe: form.timeframe,
+          }),
+        });
+        if (!seedRes.ok) throw new Error("Failed to save modified strategy");
+        const newStrategy = await seedRes.json();
+        strategyId = newStrategy.id;
+        await loadStrategies();
+      }
+
       const body: Record<string, unknown> = {
-        strategy_id: form.strategy_id,
+        strategy_id: strategyId,
         pair: form.pair,
         timeframe: form.timeframe,
         period_start: form.period_start,
@@ -628,14 +734,15 @@ function OptimizationPageInner() {
         />
 
         {/* New run form — takes remaining space, scrollable */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <h3 className="text-xs font-semibold text-zinc-400 uppercase mb-3">New Run</h3>
-          <form onSubmit={handleSubmit} className="space-y-2">
+        <div className="flex-1 overflow-y-auto p-3">
+          <h3 className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide mb-0.5">New Run</h3>
+          <form onSubmit={handleSubmit} className="space-y-0.5">
+
             {/* Strategy */}
             <div>
-              <label className="text-xs text-zinc-400">Strategy</label>
+              <label className="text-[10px] text-zinc-500 leading-none">Strategy</label>
               <select
-                className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200"
+                className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200"
                 value={form.strategy_id}
                 onChange={(e) => setForm((f) => ({ ...f, strategy_id: e.target.value }))}
                 required
@@ -649,137 +756,151 @@ function OptimizationPageInner() {
               </select>
             </div>
 
-            {/* Pair + Timeframe */}
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <label className="text-xs text-zinc-400">Pair</label>
-                <select
-                  className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200"
-                  value={form.pair}
-                  onChange={(e) => setForm((f) => ({ ...f, pair: e.target.value }))}
-                >
+            {/* Indicator Parameters */}
+            {editedIr && (() => {
+              const entryConds = (editedIr.entry_conditions as Record<string, unknown>[]) ?? [];
+              const exitConds  = editedIr.exit_conditions as Record<string, Record<string, unknown>> | undefined;
+              const sizing     = editedIr.position_sizing as Record<string, unknown> | undefined;
+              const inputCls   = "w-14 bg-zinc-700 border border-zinc-600 rounded px-1 py-0.5 text-xs text-zinc-200 text-right";
+              return (
+                <div className="rounded border border-zinc-700 bg-zinc-800/50 p-2 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide">Indicator Parameters</span>
+                    {irDirty && (
+                      <span className="text-[10px] text-yellow-400 flex items-center gap-1">
+                        ● modified
+                        <button type="button" onClick={() => {
+                          const s = strategies.find((s) => s.id === form.strategy_id);
+                          if (s) { setEditedIr(JSON.parse(JSON.stringify(s.ir_json))); setIrDirty(false); }
+                        }} className="text-zinc-500 hover:text-zinc-300 underline ml-1">reset</button>
+                      </span>
+                    )}
+                  </div>
+                  {entryConds.map((cond, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-zinc-300 w-10 shrink-0">{String(cond.indicator)}</span>
+                      {getConditionParams(cond).map((p) => (
+                        <label key={p.key} className="flex items-center gap-0.5">
+                          <span className="text-[10px] text-zinc-500 leading-none">{p.label}</span>
+                          <input type="number" step={p.step} min={p.min} value={Number(cond[p.key] ?? 0)}
+                            onChange={(e) => updateEntryParam(idx, p.key, p.isInt ? parseInt(e.target.value, 10) : parseFloat(e.target.value))}
+                            className={inputCls} />
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                  {(["stop_loss", "take_profit"] as const).map((side) => {
+                    const ec = exitConds?.[side];
+                    if (!ec) return null;
+                    return (
+                      <div key={side} className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-zinc-300 w-10 shrink-0">{side === "stop_loss" ? "SL" : "TP"}</span>
+                        <span className="text-[10px] text-zinc-500 leading-none">{String(ec.type)}</span>
+                        {getExitParams(ec).map((p) => (
+                          <label key={p.key} className="flex items-center gap-0.5">
+                            <span className="text-[10px] text-zinc-500 leading-none">{p.label}</span>
+                            <input type="number" step={p.step} min={p.min} value={Number(ec[p.key] ?? 0)}
+                              onChange={(e) => updateExitParam(side, p.key, p.isInt ? parseInt(e.target.value, 10) : parseFloat(e.target.value))}
+                              className={inputCls} />
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  {sizing && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-zinc-300 w-10 shrink-0">Size</span>
+                      <label className="flex items-center gap-0.5">
+                        <span className="text-[10px] text-zinc-500 leading-none">risk%</span>
+                        <input type="number" step={0.1} min={0.1} value={Number(sizing.risk_per_trade_pct ?? 1)}
+                          onChange={(e) => updateSizingParam("risk_per_trade_pct", parseFloat(e.target.value))}
+                          className={inputCls} />
+                      </label>
+                      <label className="flex items-center gap-0.5">
+                        <span className="text-[10px] text-zinc-500 leading-none">max</span>
+                        <input type="number" step={1000} min={1000} value={Number(sizing.max_size_units ?? 100000)}
+                          onChange={(e) => updateSizingParam("max_size_units", parseInt(e.target.value, 10))}
+                          className="w-20 bg-zinc-700 border border-zinc-600 rounded px-1 py-0.5 text-xs text-zinc-200 text-right" />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Pair · TF · Start · End — 2×2 grid */}
+            <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+              <div>
+                <label className="text-[10px] text-zinc-500 leading-none">Pair</label>
+                <select className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200"
+                  value={form.pair} onChange={(e) => setForm((f) => ({ ...f, pair: e.target.value }))}>
                   {PAIRS.map((p) => <option key={p}>{p}</option>)}
                 </select>
               </div>
-              <div className="flex-1">
-                <label className="text-xs text-zinc-400">TF</label>
-                <select
-                  className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200"
-                  value={form.timeframe}
-                  onChange={(e) => setForm((f) => ({ ...f, timeframe: e.target.value }))}
-                >
+              <div>
+                <label className="text-[10px] text-zinc-500 leading-none">TF</label>
+                <select className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200"
+                  value={form.timeframe} onChange={(e) => setForm((f) => ({ ...f, timeframe: e.target.value }))}>
                   {TIMEFRAMES.map((t) => <option key={t}>{t}</option>)}
                 </select>
               </div>
-            </div>
-
-            {/* Dates */}
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <label className="text-xs text-zinc-400">Start</label>
-                <input
-                  type="date"
-                  className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200"
-                  value={form.period_start}
-                  onChange={(e) => setForm((f) => ({ ...f, period_start: e.target.value }))}
-                  required
-                />
+              <div>
+                <label className="text-[10px] text-zinc-500 leading-none">Start</label>
+                <input type="date" required
+                  className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200"
+                  value={form.period_start} onChange={(e) => setForm((f) => ({ ...f, period_start: e.target.value }))} />
               </div>
-              <div className="flex-1">
-                <label className="text-xs text-zinc-400">End</label>
-                <input
-                  type="date"
-                  className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200"
-                  value={form.period_end}
-                  onChange={(e) => setForm((f) => ({ ...f, period_end: e.target.value }))}
-                  required
-                />
+              <div>
+                <label className="text-[10px] text-zinc-500 leading-none">End</label>
+                <input type="date" required
+                  className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200"
+                  value={form.period_end} onChange={(e) => setForm((f) => ({ ...f, period_end: e.target.value }))} />
               </div>
             </div>
 
-            {/* Iterations + Time limit */}
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <label className="text-xs text-zinc-400">Max iters</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200"
-                  value={form.max_iterations}
-                  onChange={(e) => setForm((f) => ({ ...f, max_iterations: e.target.value }))}
-                  required
-                />
+            {/* Iters · Time · Sharpe · WR — 2×2 grid */}
+            <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+              <div>
+                <label className="text-[10px] text-zinc-500 leading-none">Max iters</label>
+                <input type="number" min={1} max={100} required
+                  className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200"
+                  value={form.max_iterations} onChange={(e) => setForm((f) => ({ ...f, max_iterations: e.target.value }))} />
               </div>
-              <div className="flex-1">
-                <label className="text-xs text-zinc-400">Limit (min)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={600}
-                  className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200"
-                  value={form.time_limit_minutes}
-                  onChange={(e) => setForm((f) => ({ ...f, time_limit_minutes: e.target.value }))}
-                  required
-                />
+              <div>
+                <label className="text-[10px] text-zinc-500 leading-none">Time limit (min)</label>
+                <input type="number" min={1} max={600} required
+                  className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200"
+                  value={form.time_limit_minutes} onChange={(e) => setForm((f) => ({ ...f, time_limit_minutes: e.target.value }))} />
               </div>
-            </div>
-
-            {/* Target Sharpe + Win rate */}
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <label className="text-xs text-zinc-400">Target Sharpe</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="e.g. 1.5"
-                  className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200"
-                  value={form.target_sharpe}
-                  onChange={(e) => setForm((f) => ({ ...f, target_sharpe: e.target.value }))}
-                />
+              <div>
+                <label className="text-[10px] text-zinc-500 leading-none">Target Sharpe</label>
+                <input type="number" step="0.01" placeholder="e.g. 1.5"
+                  className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200"
+                  value={form.target_sharpe} onChange={(e) => setForm((f) => ({ ...f, target_sharpe: e.target.value }))} />
               </div>
-              <div className="flex-1">
-                <label className="text-xs text-zinc-400">Target WR %</label>
-                <input
-                  type="number"
-                  step="1"
-                  min={0}
-                  max={100}
-                  placeholder="e.g. 55"
-                  className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200"
-                  value={form.target_win_rate}
-                  onChange={(e) => setForm((f) => ({ ...f, target_win_rate: e.target.value }))}
-                />
+              <div>
+                <label className="text-[10px] text-zinc-500 leading-none">Target WR %</label>
+                <input type="number" step="1" min={0} max={100} placeholder="e.g. 55"
+                  className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200"
+                  value={form.target_win_rate} onChange={(e) => setForm((f) => ({ ...f, target_win_rate: e.target.value }))} />
               </div>
             </div>
 
-            {/* System prompt */}
+            {/* Prompts */}
             <div>
-              <label className="text-xs text-zinc-400">Optimization goal (system)</label>
-              <textarea
-                rows={2}
-                placeholder="e.g. Maximize Sharpe while keeping drawdown below 15%"
-                className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200 resize-none"
-                value={form.system_prompt}
-                onChange={(e) => setForm((f) => ({ ...f, system_prompt: e.target.value }))}
-              />
+              <label className="text-[10px] text-zinc-500 leading-none">Goal</label>
+              <textarea rows={2} placeholder="e.g. Maximize Sharpe while keeping drawdown below 15%"
+                className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200 resize-none"
+                value={form.system_prompt} onChange={(e) => setForm((f) => ({ ...f, system_prompt: e.target.value }))} />
             </div>
-
-            {/* User prompt */}
             <div>
-              <label className="text-xs text-zinc-400">Additional instruction (user)</label>
-              <textarea
-                rows={2}
-                placeholder="e.g. Focus on improving win rate first"
-                className="mt-0.5 w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-200 resize-none"
-                value={form.user_prompt}
-                onChange={(e) => setForm((f) => ({ ...f, user_prompt: e.target.value }))}
-              />
+              <label className="text-[10px] text-zinc-500 leading-none">Additional instruction</label>
+              <textarea rows={2} placeholder="e.g. Focus on improving win rate first"
+                className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-xs text-zinc-200 resize-none"
+                value={form.user_prompt} onChange={(e) => setForm((f) => ({ ...f, user_prompt: e.target.value }))} />
             </div>
 
-            {error && (
-              <p className="text-xs text-red-400">{error}</p>
-            )}
+            {error && <p className="text-xs text-red-400">{error}</p>}
 
             <button
               type="submit"

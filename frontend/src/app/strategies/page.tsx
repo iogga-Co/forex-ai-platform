@@ -119,7 +119,7 @@ function StrategyCard({
   return (
     <div
       className={[
-        "rounded-lg border p-4 cursor-pointer transition-colors",
+        "rounded-lg border px-3 py-1.5 cursor-pointer transition-colors",
         selected
           ? "border-accent bg-accent/10"
           : checked
@@ -128,7 +128,7 @@ function StrategyCard({
       ].join(" ")}
       onClick={() => onSelect(s.id)}
     >
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex items-center gap-2">
         <input
           type="checkbox"
           checked={checked}
@@ -140,8 +140,8 @@ function StrategyCard({
         <span className="text-xs text-gray-500">{s.timeframe}</span>
         <span className="text-xs text-gray-600">v{s.version}</span>
       </div>
-      <p className="text-sm text-gray-200 pl-5">{s.description}</p>
-      <p className="text-xs text-gray-600 mt-1 pl-5">
+      <p className="text-xs text-gray-200 pl-5">{s.description}</p>
+      <p className="text-xs text-gray-600 pl-5">
         {entryCount(s.ir_json)} entry condition{entryCount(s.ir_json) !== 1 ? "s" : ""}
       </p>
 

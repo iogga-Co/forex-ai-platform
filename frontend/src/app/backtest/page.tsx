@@ -43,6 +43,39 @@ interface RunSummary {
 const PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"];
 const TIMEFRAMES = ["1m", "1H"];
 
+interface ParamDef { key: string; label: string; step: number; min: number; isInt?: boolean }
+
+function getConditionParams(cond: Record<string, unknown>): ParamDef[] {
+  switch (cond.indicator as string) {
+    case "MACD": return [
+      { key: "fast", label: "fast", step: 1, min: 1, isInt: true },
+      { key: "slow", label: "slow", step: 1, min: 1, isInt: true },
+      { key: "signal_period", label: "sig", step: 1, min: 1, isInt: true },
+    ];
+    case "BB": return [
+      { key: "period", label: "period", step: 1, min: 2, isInt: true },
+      { key: "std_dev", label: "σ", step: 0.1, min: 0.1 },
+    ];
+    case "STOCH": return [
+      { key: "k_smooth", label: "K", step: 1, min: 1, isInt: true },
+      { key: "d_period", label: "D", step: 1, min: 1, isInt: true },
+    ];
+    default: {
+      const params: ParamDef[] = [{ key: "period", label: "period", step: 1, min: 1, isInt: true }];
+      if ("value" in cond) params.push({ key: "value", label: "val", step: 0.1, min: 0 });
+      return params;
+    }
+  }
+}
+
+function getExitParams(cond: Record<string, unknown>): ParamDef[] {
+  if (cond.type === "atr") return [
+    { key: "period", label: "period", step: 1, min: 1, isInt: true },
+    { key: "multiplier", label: "mult", step: 0.1, min: 0.1 },
+  ];
+  return [{ key: "value", label: cond.type === "pct" ? "%" : "pips", step: cond.type === "pct" ? 0.1 : 1, min: 0.1 }];
+}
+
 function fmt(v: number | null, d = 2) {
   return v === null || v === undefined ? "—" : v.toFixed(d);
 }
@@ -103,6 +136,8 @@ function BacktestPageInner() {
     period_end: searchParams.get("period_end") ?? cfg.default_period_end,
     initial_capital: String(cfg.default_initial_capital),
   });
+  const [editedIr, setEditedIr] = useState<Record<string, unknown> | null>(null);
+  const [irDirty, setIrDirty] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -143,6 +178,46 @@ function BacktestPageInner() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
+  // Sync editedIr when strategy selection changes
+  useEffect(() => {
+    const strat = strategies.find((s) => s.id === form.strategy_id);
+    if (strat?.ir_json) {
+      const ir = strat.ir_json;
+      setEditedIr(typeof ir === "string" ? JSON.parse(ir) : { ...(ir as Record<string, unknown>) });
+      setIrDirty(false);
+    } else {
+      setEditedIr(null);
+    }
+  }, [form.strategy_id, strategies]);
+
+  function updateEntryParam(idx: number, key: string, value: number) {
+    setEditedIr((prev) => {
+      if (!prev) return prev;
+      const conditions = [...(prev.entry_conditions as Record<string, unknown>[])];
+      conditions[idx] = { ...conditions[idx], [key]: value };
+      return { ...prev, entry_conditions: conditions };
+    });
+    setIrDirty(true);
+  }
+
+  function updateExitParam(side: "stop_loss" | "take_profit", key: string, value: number) {
+    setEditedIr((prev) => {
+      if (!prev) return prev;
+      const exitConds = prev.exit_conditions as Record<string, Record<string, unknown>>;
+      return { ...prev, exit_conditions: { ...exitConds, [side]: { ...exitConds[side], [key]: value } } };
+    });
+    setIrDirty(true);
+  }
+
+  function updateSizingParam(key: string, value: number) {
+    setEditedIr((prev) => {
+      if (!prev) return prev;
+      const sizing = prev.position_sizing as Record<string, unknown>;
+      return { ...prev, position_sizing: { ...sizing, [key]: value } };
+    });
+    setIrDirty(true);
+  }
+
   // Poll job status
   useEffect(() => {
     if (!jobId) return;
@@ -177,13 +252,34 @@ function BacktestPageInner() {
     setError(null);
     setJobId(null);
     setJobStatus(null);
+
+    let strategyId = form.strategy_id;
+
+    if (irDirty && editedIr) {
+      const strat = strategies.find((s) => s.id === form.strategy_id);
+      const name = `[BT seed] ${strat?.pair || form.pair} ${strat?.timeframe || form.timeframe}`;
+      try {
+        const saveRes = await fetchWithAuth("/api/strategies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, strategy_ir: editedIr }),
+        });
+        if (!saveRes.ok) throw new Error(await saveRes.text());
+        const saved = await saveRes.json();
+        strategyId = saved.id;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save modified strategy");
+        return;
+      }
+    }
+
     const sessionId = crypto.randomUUID();
     try {
       const res = await fetchWithAuth(`/api/backtest?session_id=${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          strategy_id: form.strategy_id,
+          strategy_id: strategyId,
           pair: form.pair,
           timeframe: form.timeframe,
           period_start: form.period_start,
@@ -222,29 +318,22 @@ function BacktestPageInner() {
       <div className="w-[400px] shrink-0 flex flex-col overflow-y-auto pr-6 border-r border-gray-800">
 
         {/* Form */}
-        <div className="space-y-4 pb-6">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-100">Backtest</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Run a strategy against historical OHLCV data.
-            </p>
-          </div>
+        <div className="pb-4">
+          <h1 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Backtest</h1>
 
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form onSubmit={handleSubmit} className="space-y-0.5">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Strategy</label>
+              <label className="text-[10px] text-gray-500 leading-none">Strategy</label>
               {strategies.length === 0 ? (
-                <p className="text-sm text-gray-500">
+                <p className="text-xs text-gray-500">
                   No strategies yet —{" "}
-                  <Link href="/copilot" className="text-blue-400 hover:underline">
-                    create one in the Co-Pilot
-                  </Link>
+                  <Link href="/copilot" className="text-blue-400 hover:underline">create one in Co-Pilot</Link>
                 </p>
               ) : (
                 <select
                   value={form.strategy_id}
                   onChange={(e) => setForm({ ...form, strategy_id: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-xs rounded px-2 py-0.5"
                 >
                   {strategies.map((s) => (
                     <option key={s.id} value={s.id}>{stratName(s)}</option>
@@ -253,61 +342,115 @@ function BacktestPageInner() {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            {/* Indicator Parameters */}
+            {editedIr && (() => {
+              const entryConds = (editedIr.entry_conditions as Record<string, unknown>[]) ?? [];
+              const exitConds  = editedIr.exit_conditions as Record<string, Record<string, unknown>> | undefined;
+              const sizing     = editedIr.position_sizing as Record<string, unknown> | undefined;
+              const inputCls   = "w-14 bg-zinc-700 border border-zinc-600 rounded px-1 py-0.5 text-xs text-zinc-200 text-right";
+              return (
+                <div className="rounded border border-zinc-700 bg-zinc-800/50 p-2 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide">Indicator Parameters</span>
+                    {irDirty && (
+                      <span className="text-[10px] text-yellow-400 flex items-center gap-1">
+                        ● modified
+                        <button type="button" onClick={() => {
+                          const s = strategies.find((s) => s.id === form.strategy_id);
+                          if (s) { setEditedIr(JSON.parse(JSON.stringify(s.ir_json))); setIrDirty(false); }
+                        }} className="text-zinc-500 hover:text-zinc-300 underline ml-1">reset</button>
+                      </span>
+                    )}
+                  </div>
+                  {entryConds.map((cond, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-zinc-300 w-10 shrink-0">{String(cond.indicator)}</span>
+                      {getConditionParams(cond).map((p) => (
+                        <label key={p.key} className="flex items-center gap-0.5">
+                          <span className="text-[10px] text-zinc-500">{p.label}</span>
+                          <input type="number" step={p.step} min={p.min} value={Number(cond[p.key] ?? 0)}
+                            onChange={(e) => updateEntryParam(idx, p.key, p.isInt ? parseInt(e.target.value, 10) : parseFloat(e.target.value))}
+                            className={inputCls} />
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                  {(["stop_loss", "take_profit"] as const).map((side) => {
+                    const ec = exitConds?.[side];
+                    if (!ec) return null;
+                    return (
+                      <div key={side} className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-zinc-300 w-10 shrink-0">{side === "stop_loss" ? "SL" : "TP"}</span>
+                        <span className="text-[10px] text-zinc-500">{String(ec.type)}</span>
+                        {getExitParams(ec).map((p) => (
+                          <label key={p.key} className="flex items-center gap-0.5">
+                            <span className="text-[10px] text-zinc-500">{p.label}</span>
+                            <input type="number" step={p.step} min={p.min} value={Number(ec[p.key] ?? 0)}
+                              onChange={(e) => updateExitParam(side, p.key, p.isInt ? parseInt(e.target.value, 10) : parseFloat(e.target.value))}
+                              className={inputCls} />
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  {sizing && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-zinc-300 w-10 shrink-0">Size</span>
+                      <label className="flex items-center gap-0.5">
+                        <span className="text-[10px] text-zinc-500">risk%</span>
+                        <input type="number" step={0.1} min={0.1} value={Number(sizing.risk_per_trade_pct ?? 1)}
+                          onChange={(e) => updateSizingParam("risk_per_trade_pct", parseFloat(e.target.value))}
+                          className={inputCls} />
+                      </label>
+                      <label className="flex items-center gap-0.5">
+                        <span className="text-[10px] text-zinc-500">max</span>
+                        <input type="number" step={1000} min={1000} value={Number(sizing.max_size_units ?? 100000)}
+                          onChange={(e) => updateSizingParam("max_size_units", parseInt(e.target.value, 10))}
+                          className="w-20 bg-zinc-700 border border-zinc-600 rounded px-1 py-0.5 text-xs text-zinc-200 text-right" />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Pair · TF · From · To · Capital — 2×3 grid */}
+            <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Pair</label>
-                <select
-                  value={form.pair}
-                  onChange={(e) => setForm({ ...form, pair: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-                >
+                <label className="text-[10px] text-gray-500 leading-none">Pair</label>
+                <select value={form.pair} onChange={(e) => setForm({ ...form, pair: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-xs rounded px-2 py-0.5">
                   {PAIRS.map((p) => <option key={p}>{p}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Timeframe</label>
-                <select
-                  value={form.timeframe}
-                  onChange={(e) => setForm({ ...form, timeframe: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-                >
+                <label className="text-[10px] text-gray-500 leading-none">Timeframe</label>
+                <select value={form.timeframe} onChange={(e) => setForm({ ...form, timeframe: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-xs rounded px-2 py-0.5">
                   {TIMEFRAMES.map((t) => <option key={t}>{t}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs text-gray-400 mb-1">From</label>
-                <input
-                  type="date"
-                  value={form.period_start}
-                  onChange={(e) => setForm({ ...form, period_start: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-                />
+                <label className="text-[10px] text-gray-500 leading-none">From</label>
+                <input type="date" value={form.period_start} onChange={(e) => setForm({ ...form, period_start: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-xs rounded px-2 py-0.5" />
               </div>
               <div>
-                <label className="block text-xs text-gray-400 mb-1">To</label>
-                <input
-                  type="date"
-                  value={form.period_end}
-                  onChange={(e) => setForm({ ...form, period_end: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-                />
+                <label className="text-[10px] text-gray-500 leading-none">To</label>
+                <input type="date" value={form.period_end} onChange={(e) => setForm({ ...form, period_end: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-xs rounded px-2 py-0.5" />
               </div>
-            </div>
-
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Initial capital ($)</label>
-              <input
-                type="number"
-                value={form.initial_capital}
-                onChange={(e) => setForm({ ...form, initial_capital: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm rounded px-3 py-2"
-              />
+              <div className="col-span-2">
+                <label className="text-[10px] text-gray-500 leading-none">Initial capital ($)</label>
+                <input type="number" value={form.initial_capital} onChange={(e) => setForm({ ...form, initial_capital: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-xs rounded px-2 py-0.5" />
+              </div>
             </div>
 
             <button
               type="submit"
               disabled={!form.strategy_id || !!jobId}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded px-4 py-2 transition-colors"
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded px-3 py-1 transition-colors"
             >
               {jobId ? "Running…" : "Run Backtest"}
             </button>
