@@ -48,9 +48,9 @@ async def get_full_response(
     """Non-streaming OpenAI response. Returns complete text."""
     client = _get_client()
     try:
-        response = await client.chat.completions.create(
+        response = await client.chat.completions.create(  # type: ignore[call-overload]
             model=model,
-            messages=messages,  # type: ignore[arg-type]
+            messages=messages,
             max_tokens=4096,
         )
         text = response.choices[0].message.content or ""
@@ -77,9 +77,9 @@ async def stream_chat(
     total_input = 0
     total_output = 0
     try:
-        stream = await client.chat.completions.create(
+        stream = await client.chat.completions.create(  # type: ignore[call-overload]
             model=model,
-            messages=messages,  # type: ignore[arg-type]
+            messages=messages,
             max_tokens=4096,
             stream=True,
             stream_options={"include_usage": True},
