@@ -105,6 +105,35 @@ const OVERLAY_COLORS = ["#3b82f6", "#f59e0b", "#a855f7", "#06b6d4", "#f97316"];
 const OSC_COLORS = { rsi: "#06b6d4", macdLine: "#3b82f6", macdSig: "#f97316", macdHist: "#6b7280", adx: "#a855f7", stochK: "#22d3ee", stochD: "#f97316", atr: "#94a3b8" };
 
 type OscTab = "RSI" | "MACD" | "ADX" | "STOCH" | "ATR";
+type IndicatorType = "EMA" | "SMA" | "BB" | "RSI" | "MACD" | "ADX" | "STOCH" | "ATR";
+
+interface ChartOverlay {
+  id: string;
+  type: IndicatorType;
+  period: number;
+  fast: number;
+  slow: number;
+  signal_period: number;
+  std_dev: number;
+  k_smooth: number;
+  d_period: number;
+  color: string;
+}
+
+const USER_OVERLAY_COLORS = ["#ec4899", "#10b981", "#84cc16", "#38bdf8", "#c084fc", "#fb923c", "#facc15"];
+const MAIN_INDICATORS: IndicatorType[] = ["EMA", "SMA", "BB"];
+const ALL_INDICATORS: IndicatorType[] = ["EMA", "SMA", "BB", "RSI", "MACD", "ADX", "STOCH", "ATR"];
+
+const INDICATOR_DEFAULTS: Record<IndicatorType, Partial<ChartOverlay>> = {
+  EMA:   { period: 20 },
+  SMA:   { period: 50 },
+  BB:    { period: 20, std_dev: 2.0 },
+  RSI:   { period: 14 },
+  MACD:  { fast: 12, slow: 26, signal_period: 9, period: 12 },
+  ADX:   { period: 14 },
+  STOCH: { period: 14, k_smooth: 3, d_period: 3 },
+  ATR:   { period: 14 },
+};
 
 function defaultDateFrom() {
   const d = new Date();
@@ -167,6 +196,12 @@ function SuperchartPageInner() {
   // --- strategy IR (editable copy) ---
   const [currentSIR, setCurrentSIR] = useState<StrategyIR | null>(null);
   const [originalSIR, setOriginalSIR] = useState<StrategyIR | null>(null);
+
+  // --- chart indicator overlays ---
+  const [chartOverlays, setChartOverlays] = useState<ChartOverlay[]>([]);
+  const [newOverlayType, setNewOverlayType] = useState<IndicatorType>("EMA");
+  const userOverlaySeriesRef = useRef<ISeriesApi<"Line">[]>([]);
+  const userSubSeriesRef = useRef<ISeriesApi<"Line" | "Histogram">[]>([]);
 
   // --- period diagnosis ---
   const [diagPeriodStart, setDiagPeriodStart] = useState("");
@@ -435,6 +470,114 @@ function SuperchartPageInner() {
     renderOscillator(sub, times, closes, highs, lows, currentSIR, activeOsc);
 
   }, [candles, currentSIR, activeOsc]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---------------------------------------------------------------------------
+  // Render user-added indicator overlays
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const main = mainChartRef.current;
+    const sub  = subChartRef.current;
+    if (!main || !sub || candles.length === 0) return;
+
+    userOverlaySeriesRef.current.forEach((s) => { try { main.removeSeries(s); } catch {} });
+    userOverlaySeriesRef.current = [];
+    userSubSeriesRef.current.forEach((s) => { try { sub.removeSeries(s); } catch {} });
+    userSubSeriesRef.current = [];
+
+    const times  = candles.map((c) => c.time);
+    const closes = candles.map((c) => c.close);
+    const highs  = candles.map((c) => c.high);
+    const lows   = candles.map((c) => c.low);
+
+    for (const ov of chartOverlays) {
+      const { type, color, period } = ov;
+
+      if (type === "EMA") {
+        const s = main.addLineSeries({ color, lineWidth: 1 as LineWidth, priceLineVisible: false, lastValueVisible: false, title: `EMA ${period}` });
+        s.setData(toChartData(times, ema(closes, period)) as { time: Time; value: number }[]);
+        userOverlaySeriesRef.current.push(s);
+
+      } else if (type === "SMA") {
+        const s = main.addLineSeries({ color, lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, title: `SMA ${period}` });
+        s.setData(toChartData(times, sma(closes, period)) as { time: Time; value: number }[]);
+        userOverlaySeriesRef.current.push(s);
+
+      } else if (type === "BB") {
+        const { upper, middle, lower } = bollingerBands(closes, period, ov.std_dev);
+        const opts = { color, lineWidth: 1 as LineWidth, priceLineVisible: false, lastValueVisible: false };
+        const su = main.addLineSeries({ ...opts, title: `BB ${period} U` });
+        const sm2 = main.addLineSeries({ ...opts, lineStyle: LineStyle.Dashed, title: `BB ${period} M` });
+        const sl = main.addLineSeries({ ...opts, title: `BB ${period} L` });
+        su.setData(toChartData(times, upper)  as { time: Time; value: number }[]);
+        sm2.setData(toChartData(times, middle) as { time: Time; value: number }[]);
+        sl.setData(toChartData(times, lower)  as { time: Time; value: number }[]);
+        userOverlaySeriesRef.current.push(su, sm2, sl);
+
+      } else if (type === "RSI") {
+        const s = sub.addLineSeries({ color, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `RSI ${period}` });
+        s.setData(toChartData(times, rsi(closes, period)) as { time: Time; value: number }[]);
+        s.createPriceLine({ price: 70, color: "#ef4444", lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "70" });
+        s.createPriceLine({ price: 30, color: "#22c55e", lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "30" });
+        userSubSeriesRef.current.push(s);
+
+      } else if (type === "MACD") {
+        const { line, signal, hist } = macd(closes, ov.fast, ov.slow, ov.signal_period);
+        const sLine = sub.addLineSeries({ color, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `MACD` });
+        const sSig  = sub.addLineSeries({ color: "#f97316", lineWidth: 1 as LineWidth, priceLineVisible: false, title: `Signal` });
+        const sHist = sub.addHistogramSeries({ priceLineVisible: false, title: `Hist` });
+        sLine.setData(toChartData(times, line)   as { time: Time; value: number }[]);
+        sSig.setData(toChartData(times, signal)  as { time: Time; value: number }[]);
+        sHist.setData(times.flatMap((t, i) => {
+          if (hist[i] === null) return [];
+          const v = hist[i] as number;
+          return [{ time: t as Time, value: v, color: v >= 0 ? "#22c55e99" : "#ef444499" }];
+        }));
+        userSubSeriesRef.current.push(sLine, sSig, sHist);
+
+      } else if (type === "ADX") {
+        const s = sub.addLineSeries({ color, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `ADX ${period}` });
+        s.setData(toChartData(times, adx(highs, lows, closes, period)) as { time: Time; value: number }[]);
+        s.createPriceLine({ price: 25, color: "#6b7280", lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "25" });
+        userSubSeriesRef.current.push(s);
+
+      } else if (type === "STOCH") {
+        const { k, d } = stochastic(highs, lows, closes, period, ov.k_smooth, ov.d_period);
+        const sK = sub.addLineSeries({ color, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `%K` });
+        const sD = sub.addLineSeries({ color: "#f97316", lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, priceLineVisible: false, title: `%D` });
+        sK.setData(toChartData(times, k) as { time: Time; value: number }[]);
+        sD.setData(toChartData(times, d) as { time: Time; value: number }[]);
+        sK.createPriceLine({ price: 80, color: "#ef4444", lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "80" });
+        sK.createPriceLine({ price: 20, color: "#22c55e", lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "20" });
+        userSubSeriesRef.current.push(sK, sD);
+
+      } else if (type === "ATR") {
+        const s = sub.addLineSeries({ color, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `ATR ${period}` });
+        s.setData(toChartData(times, atr(highs, lows, closes, period)) as { time: Time; value: number }[]);
+        userSubSeriesRef.current.push(s);
+      }
+    }
+  }, [candles, chartOverlays]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function addOverlay() {
+    const defaults = INDICATOR_DEFAULTS[newOverlayType];
+    const color = USER_OVERLAY_COLORS[chartOverlays.length % USER_OVERLAY_COLORS.length];
+    setChartOverlays((prev) => [...prev, {
+      id: Math.random().toString(36).slice(2),
+      type: newOverlayType,
+      period: 14, fast: 12, slow: 26, signal_period: 9,
+      std_dev: 2.0, k_smooth: 3, d_period: 3,
+      color,
+      ...defaults,
+    }]);
+  }
+
+  function updateOverlay(id: string, patch: Partial<ChartOverlay>) {
+    setChartOverlays((prev) => prev.map((o) => o.id === id ? { ...o, ...patch } : o));
+  }
+
+  function removeOverlay(id: string) {
+    setChartOverlays((prev) => prev.filter((o) => o.id !== id));
+  }
 
   function renderOscillator(
     sub: IChartApi,
@@ -837,6 +980,96 @@ function SuperchartPageInner() {
               </div>
             </Section>
           )}
+
+          {/* Chart Indicators */}
+          <Section title="Chart Indicators">
+            <div className="flex gap-1 mb-2">
+              <select
+                value={newOverlayType}
+                onChange={(e) => setNewOverlayType(e.target.value as IndicatorType)}
+                className="flex-1 bg-zinc-800 text-zinc-200 text-xs rounded px-1.5 py-1 border border-zinc-700"
+              >
+                {ALL_INDICATORS.map((t) => (
+                  <option key={t} value={t}>{t}{MAIN_INDICATORS.includes(t) ? "" : " (sub)"}</option>
+                ))}
+              </select>
+              <button
+                onClick={addOverlay}
+                disabled={candles.length === 0}
+                className="rounded border border-blue-700 px-2 py-1 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                + Add
+              </button>
+            </div>
+            {chartOverlays.length === 0 ? (
+              <p className="text-[10px] text-zinc-500">No indicators added. Load candles first.</p>
+            ) : (
+              <div className="space-y-2">
+                {chartOverlays.map((ov) => (
+                  <div key={ov.id} className="rounded border border-zinc-700 bg-zinc-800/60 px-2 py-1.5 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: ov.color }} />
+                      <span className="text-[11px] font-semibold text-zinc-200 flex-1">{ov.type}</span>
+                      <button
+                        onClick={() => removeOverlay(ov.id)}
+                        className="text-zinc-500 hover:text-red-400 text-sm leading-none transition-colors"
+                        title="Remove"
+                      >×</button>
+                    </div>
+                    {/* Params */}
+                    {ov.type !== "MACD" && ov.type !== "STOCH" && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-[10px] text-zinc-500 w-10 shrink-0">Period</label>
+                        <input
+                          type="number" min={2} value={ov.period}
+                          onChange={(e) => updateOverlay(ov.id, { period: Math.max(2, parseInt(e.target.value) || 2) })}
+                          className="w-14 bg-zinc-900 border border-zinc-600 rounded px-1.5 py-0.5 text-xs text-zinc-200"
+                        />
+                        {ov.type === "BB" && (
+                          <>
+                            <label className="text-[10px] text-zinc-500 shrink-0">σ</label>
+                            <input
+                              type="number" min={0.1} step={0.1} value={ov.std_dev}
+                              onChange={(e) => updateOverlay(ov.id, { std_dev: Math.max(0.1, parseFloat(e.target.value) || 2) })}
+                              className="w-12 bg-zinc-900 border border-zinc-600 rounded px-1.5 py-0.5 text-xs text-zinc-200"
+                            />
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {ov.type === "MACD" && (
+                      <div className="grid grid-cols-3 gap-1">
+                        {([["Fast", "fast", ov.fast], ["Slow", "slow", ov.slow], ["Sig", "signal_period", ov.signal_period]] as [string, keyof ChartOverlay, number][]).map(([lbl, key, val]) => (
+                          <div key={key}>
+                            <label className="text-[10px] text-zinc-500 block">{lbl}</label>
+                            <input
+                              type="number" min={1} value={val}
+                              onChange={(e) => updateOverlay(ov.id, { [key]: Math.max(1, parseInt(e.target.value) || 1) })}
+                              className="w-full bg-zinc-900 border border-zinc-600 rounded px-1 py-0.5 text-xs text-zinc-200"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {ov.type === "STOCH" && (
+                      <div className="grid grid-cols-3 gap-1">
+                        {([["K Prd", "period", ov.period], ["K Sm", "k_smooth", ov.k_smooth], ["D Prd", "d_period", ov.d_period]] as [string, keyof ChartOverlay, number][]).map(([lbl, key, val]) => (
+                          <div key={key}>
+                            <label className="text-[10px] text-zinc-500 block">{lbl}</label>
+                            <input
+                              type="number" min={1} value={val}
+                              onChange={(e) => updateOverlay(ov.id, { [key]: Math.max(1, parseInt(e.target.value) || 1) })}
+                              className="w-full bg-zinc-900 border border-zinc-600 rounded px-1 py-0.5 text-xs text-zinc-200"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
 
           {/* Period Diagnosis */}
           {selectedBtId && (
