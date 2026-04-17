@@ -991,17 +991,18 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
                     ["entry_price",  "Entry $"],
                     ["exit_price",   "Exit $"],
                     ["pnl",          "P&L"],
+                    ["pnl_roi",      "ROI %"],
                     ["r_multiple",   "R"],
                     ["mae",          "MAE"],
                     ["mfe",          "MFE"],
-                  ] as [keyof Trade, string][]
+                  ] as [string, string][]
                 ).map(([col, label]) => (
                   <th
                     key={col}
-                    onClick={() => toggleSort(col)}
+                    onClick={() => toggleSort(col === "pnl_roi" ? "pnl" : col as keyof Trade)}
                     className="text-left py-2 pr-4 cursor-pointer hover:text-gray-200 select-none"
                   >
-                    {label}{sortCol === col ? (sortAsc ? " ▲" : " ▼") : ""}
+                    {label}{sortCol === (col === "pnl_roi" ? "pnl" : col) ? (sortAsc ? " ▲" : " ▼") : ""}
                   </th>
                 ))}
               </tr>
@@ -1047,6 +1048,9 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
                         </span>
                       )}
                       {t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(0)}
+                    </td>
+                    <td className={`pr-4 font-mono ${t.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {t.pnl >= 0 ? "+" : ""}{(t.pnl / 1000).toFixed(2)}%
                     </td>
                     <td className="pr-4 font-mono">{t.r_multiple.toFixed(2)}R</td>
                     <td className="pr-4 font-mono text-gray-500">{t.mae.toFixed(5)}</td>

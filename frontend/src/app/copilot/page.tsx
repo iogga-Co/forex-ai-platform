@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { fetchWithAuth } from "@/lib/auth";
+import { loadSettings } from "@/lib/settings";
 import {
   conditionToLabel,
   exitConditionToLabel,
@@ -420,7 +421,12 @@ export default function CopilotPage() {
       const res = await fetchWithAuth(`${API_BASE}/api/copilot/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, message, system_prompt: systemPrompt }),
+        body: JSON.stringify({
+          session_id: sessionId,
+          message,
+          system_prompt: systemPrompt,
+          model: loadSettings().ai_model,
+        }),
       });
 
       if (!res.ok || !res.body) {

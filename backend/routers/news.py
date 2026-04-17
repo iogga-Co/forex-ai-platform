@@ -84,34 +84,40 @@ def _ff_week_label(d: date) -> str:
     return "thisweek"
 
 
-def _parse_ff_time(date_str: str, time_str: str) -> datetime | None:
+def _parse_ff_time(date_val: str, time_val: str = "") -> datetime | None:
     """
-    Parse a ForexFactory date/time pair to a UTC datetime.
+    Parse a ForexFactory date value to a UTC datetime.
 
-    date_str examples: "Apr 16, 2025", "Apr 16, 2026"
-    time_str examples:  "8:30am", "2:00pm", "All Day", "Tentative", ""
+    New format (ISO 8601 with tz offset): "2026-04-17T08:30:00-04:00"
+    Old format (legacy, kept for safety): date="Apr 16, 2025", time="8:30am"
     """
+    date_val = date_val.strip()
+
+    # New format: ISO 8601 datetime string
+    if "T" in date_val:
+        try:
+            return datetime.fromisoformat(date_val).astimezone(timezone.utc)
+        except ValueError:
+            return None
+
+    # Old format: "Apr 16, 2025" + separate time string
     try:
-        d = datetime.strptime(date_str.strip(), "%b %d, %Y")
+        d = datetime.strptime(date_val, "%b %d, %Y")
     except ValueError:
         return None
 
-    time_str = time_str.strip().lower()
-    if not time_str or time_str in ("all day", "tentative", ""):
-        # No exact time — use midnight ET
+    time_str = time_val.strip().lower()
+    if not time_str or time_str in ("all day", "tentative"):
         naive = d.replace(hour=0, minute=0, second=0)
     else:
         try:
-            # Handle 12-hour format
             fmt = "%I:%M%p" if ":" in time_str else "%I%p"
             t = datetime.strptime(time_str, fmt)
             naive = d.replace(hour=t.hour, minute=t.minute, second=0)
         except ValueError:
             naive = d.replace(hour=0, minute=0, second=0)
 
-    # Attach ET timezone, convert to UTC
-    aware_et = naive.replace(tzinfo=ET_ZONE)
-    return aware_et.astimezone(timezone.utc)
+    return naive.replace(tzinfo=ET_ZONE).astimezone(timezone.utc)
 
 
 def _normalise_impact(raw: str) -> str:
@@ -139,7 +145,10 @@ async def _fetch_ff_week(label: str) -> list[dict]:
 
 def _raw_to_event(item: dict) -> dict | None:
     """Convert a raw FF dict to our normalised event dict. Returns None if unparseable."""
-    event_time = _parse_ff_time(item.get("date", ""), item.get("time", ""))
+    # Support both new format (ISO date only) and old format (date + time fields)
+    date_val = item.get("date", "")
+    time_val = item.get("time", "")
+    event_time = _parse_ff_time(date_val, time_val)
     if event_time is None:
         return None
     currency = item.get("country", "").upper()
@@ -206,12 +215,10 @@ async def get_calendar(
     # Fetch & cache each needed week
     r = aioredis.from_url(settings.redis_url, decode_responses=True)
     all_events: list[dict] = []
-    stale = False
+    thisweek_failed = False
 
     try:
         for week_label in weeks_needed:
-            # Build a cache key based on the actual Monday of that week's label
-            # We'll use the label string since we don't have the exact date
             cache_key = f"news:ff:{week_label}"
             cached = await r.get(cache_key)
 
@@ -222,7 +229,11 @@ async def get_calendar(
                 if raw_list:
                     await r.setex(cache_key, CACHE_TTL, json.dumps(raw_list))
                 else:
-                    stale = True
+                    # lastweek/nextweek returning 404 is normal — ForexFactory
+                    # doesn't always publish those feeds. Only flag stale if
+                    # thisweek itself fails.
+                    if week_label == "thisweek":
+                        thisweek_failed = True
 
             for item in raw_list:
                 event = _raw_to_event(item)
@@ -230,6 +241,8 @@ async def get_calendar(
                     all_events.append(event)
     finally:
         await r.aclose()
+
+    stale = thisweek_failed
 
     # Persist to DB (upsert) in background — don't block the response
     if all_events:

@@ -37,6 +37,7 @@ def _f(v: object) -> float | None:
 
 class DiagnoseStrategyRequest(BaseModel):
     backtest_run_id: UUID
+    model: str = "claude-sonnet-4-6"
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +94,7 @@ async def diagnose_strategy_endpoint(
         timeframe=run["timeframe"],
         metrics=metrics,
         trade_stats=stats,
+        model=payload.model,
     )
     return result
 
@@ -182,6 +184,7 @@ class TradeAnalyzeRequest(BaseModel):
     backtest_run_id: UUID
     trade_ids: list[UUID]
     stats: dict
+    model: str = "claude-sonnet-4-6"
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +322,7 @@ async def trade_analyze_endpoint(
         pair=run["pair"],
         timeframe=run["timeframe"],
         stats=payload.stats,
+        model=payload.model,
     )
 
 
@@ -331,6 +335,7 @@ class PeriodDiagnosisRequest(BaseModel):
     period_start: datetime
     period_end: datetime
     include_news: bool = True
+    model: str = "claude-sonnet-4-6"
 
 
 @router.post("/period")
@@ -428,4 +433,5 @@ async def period_diagnosis_endpoint(
         timeframe=run["timeframe"],
         trades=trades,
         news_events=news_events if news_events else None,
+        model=payload.model,
     )

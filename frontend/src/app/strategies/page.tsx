@@ -337,13 +337,13 @@ export default function StrategiesPage() {
     <div className="flex h-full overflow-hidden -m-6">
 
       {/* ── Left panel: strategy list ── */}
-      <div className="w-[420px] shrink-0 flex flex-col overflow-hidden border-r border-surface-border">
+      <div className="w-80 shrink-0 flex flex-col overflow-hidden border-r border-surface-border">
 
         {/* Header */}
-        <div className="px-6 pt-6 pb-4 shrink-0">
+        <div className="px-4 pt-4 pb-4 shrink-0">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-xl font-semibold text-gray-100">Strategies</h1>
+              <h1 className="text-sm font-semibold text-gray-100">Strategies</h1>
               <p className="text-sm text-gray-500 mt-0.5">
                 Click a strategy to select it.
               </p>
@@ -389,7 +389,7 @@ export default function StrategiesPage() {
           {/* Action toolbar — active tab only */}
           {tab === "active" && (
             <div className="space-y-2">
-              <div className="flex items-center gap-1 flex-nowrap">
+              <div className="flex items-center gap-1 flex-wrap">
                 <Link
                   href={selectedStrategy ? `/superchart?strategy_id=${selectedStrategy.id}` : "#"}
                   onClick={(e) => { if (!selectedStrategy) e.preventDefault(); }}
@@ -418,55 +418,57 @@ export default function StrategiesPage() {
                 >
                   {showIR ? "Hide IR" : "View IR"}
                 </button>
-                {confirming ? (
-                  <>
+                <div className="flex items-center gap-1">
+                  {confirming ? (
+                    <div className="flex flex-col gap-0.5">
+                      <button
+                        onClick={handleDelete}
+                        disabled={deleting}
+                        className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white hover:bg-red-500 transition-colors disabled:opacity-50"
+                      >
+                        {deleting ? "…" : checkedStrategyIds.size > 1 ? `Delete ${checkedStrategyIds.size}` : "Confirm"}
+                      </button>
+                      <button
+                        onClick={() => setConfirming(false)}
+                        disabled={deleting}
+                        className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
                     <button
-                      onClick={handleDelete}
-                      disabled={deleting}
-                      className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white hover:bg-red-500 transition-colors disabled:opacity-50"
+                      disabled={checkedStrategyIds.size === 0 && !selectedStrategy}
+                      onClick={() => setConfirming(true)}
+                      title={checkedStrategyIds.size > 1 ? `Delete ${checkedStrategyIds.size} strategies` : "Delete strategy"}
+                      className="flex items-center gap-1 rounded border border-red-800 p-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     >
-                      {deleting ? "…" : checkedStrategyIds.size > 1 ? `Delete ${checkedStrategyIds.size}` : "Confirm"}
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6" />
+                        <path d="M14 11v6" />
+                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                      </svg>
+                      {checkedStrategyIds.size > 1 && (
+                        <span className="text-[10px] font-mono">{checkedStrategyIds.size}</span>
+                      )}
                     </button>
-                    <button
-                      onClick={() => setConfirming(false)}
-                      disabled={deleting}
-                      className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    disabled={checkedStrategyIds.size === 0 && !selectedStrategy}
-                    onClick={() => setConfirming(true)}
-                    title={checkedStrategyIds.size > 1 ? `Delete ${checkedStrategyIds.size} strategies` : "Delete strategy"}
-                    className="flex items-center gap-1 rounded border border-red-800 p-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                      <path d="M10 11v6" />
-                      <path d="M14 11v6" />
-                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                    </svg>
-                    {checkedStrategyIds.size > 1 && (
-                      <span className="text-[10px] font-mono">{checkedStrategyIds.size}</span>
-                    )}
-                  </button>
-                )}
-                <input
-                  type="checkbox"
-                  title="Select all"
-                  checked={active.length > 0 && checkedStrategyIds.size === active.length}
-                  ref={(el) => {
-                    if (el) el.indeterminate = checkedStrategyIds.size > 0 && checkedStrategyIds.size < active.length;
-                  }}
-                  onChange={(e) => {
-                    if (e.target.checked) setCheckedStrategyIds(new Set(active.map((s) => s.id)));
-                    else setCheckedStrategyIds(new Set());
-                  }}
-                  className="h-3 w-3 accent-blue-500 cursor-pointer ml-0.5"
-                />
+                  )}
+                  <input
+                    type="checkbox"
+                    title="Select all"
+                    checked={active.length > 0 && checkedStrategyIds.size === active.length}
+                    ref={(el) => {
+                      if (el) el.indeterminate = checkedStrategyIds.size > 0 && checkedStrategyIds.size < active.length;
+                    }}
+                    onChange={(e) => {
+                      if (e.target.checked) setCheckedStrategyIds(new Set(active.map((s) => s.id)));
+                      else setCheckedStrategyIds(new Set());
+                    }}
+                    className="h-3 w-3 accent-blue-500 cursor-pointer ml-0.5"
+                  />
+                </div>
               </div>
               {/* Sort bar */}
               <div className="flex items-center gap-1 flex-wrap">
@@ -491,7 +493,7 @@ export default function StrategiesPage() {
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-3">
+        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-3">
           {loading && [1, 2, 3].map((i) => (
             <div key={i} className="h-20 rounded-lg border border-surface-border bg-surface-raised animate-pulse" />
           ))}
@@ -543,7 +545,7 @@ export default function StrategiesPage() {
 
       {/* ── Middle panel: backtest list for selected strategy ── */}
       {selectedStrategyId && (
-        <div className="w-72 shrink-0 flex flex-col overflow-hidden border-r border-surface-border">
+        <div className="w-[330px] shrink-0 flex flex-col overflow-hidden border-r border-surface-border">
           <div className="px-4 py-4 border-b border-surface-border shrink-0 space-y-3">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
               Backtests{checkedBacktestIds.size > 0 ? ` · ${checkedBacktestIds.size}` : ""}
@@ -559,7 +561,7 @@ export default function StrategiesPage() {
               const btnBase = "rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors";
               const btnOff = "opacity-30 pointer-events-none";
               return (
-                <div className="flex items-center gap-1 flex-nowrap">
+                <div className="flex items-center gap-1 flex-wrap">
                   <Link
                     href={bt ? `/superchart?strategy_id=${bt.strategy_id}&backtest_id=${bt.id}` : "#"}
                     onClick={(e) => { if (!bt) e.preventDefault(); }}
@@ -588,63 +590,65 @@ export default function StrategiesPage() {
                   >
                     Refine
                   </Link>
-                  {confirmingBacktest ? (
-                    <>
+                  <div className="flex items-center gap-1">
+                    {confirmingBacktest ? (
+                      <div className="flex flex-col gap-0.5">
+                        <button
+                          onClick={async () => {
+                            await Promise.allSettled(
+                              [...deleteIds].map((id) => fetchWithAuth(`${API_BASE}/api/backtest/results/${id}`, { method: "DELETE" }))
+                            );
+                            setBacktests((prev) => prev.filter((b) => !deleteIds.has(b.id)));
+                            if (selectedBacktestId && deleteIds.has(selectedBacktestId)) setSelectedBacktestId(null);
+                            setCheckedBacktestIds(new Set());
+                            setConfirmingBacktest(false);
+                          }}
+                          className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white hover:bg-red-500 transition-colors"
+                        >
+                          {deleteIds.size > 1 ? `Delete ${deleteIds.size}` : "Confirm"}
+                        </button>
+                        <button
+                          onClick={() => setConfirmingBacktest(false)}
+                          className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
                       <button
-                        onClick={async () => {
-                          await Promise.allSettled(
-                            [...deleteIds].map((id) => fetchWithAuth(`${API_BASE}/api/backtest/results/${id}`, { method: "DELETE" }))
-                          );
-                          setBacktests((prev) => prev.filter((b) => !deleteIds.has(b.id)));
-                          if (selectedBacktestId && deleteIds.has(selectedBacktestId)) setSelectedBacktestId(null);
-                          setCheckedBacktestIds(new Set());
-                          setConfirmingBacktest(false);
+                        disabled={!canDelete}
+                        title={deleteIds.size > 1 ? `Delete ${deleteIds.size} backtests` : "Delete backtest"}
+                        onClick={() => setConfirmingBacktest(true)}
+                        className="flex items-center gap-1 rounded border border-red-800 p-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                          <path d="M10 11v6" />
+                          <path d="M14 11v6" />
+                          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                        </svg>
+                        {deleteIds.size > 1 && (
+                          <span className="text-[10px] font-mono">{deleteIds.size}</span>
+                        )}
+                      </button>
+                    )}
+                    {backtests.length > 0 && (
+                      <input
+                        type="checkbox"
+                        title="Select all"
+                        checked={checkedBacktestIds.size === backtests.length}
+                        ref={(el) => {
+                          if (el) el.indeterminate = checkedBacktestIds.size > 0 && checkedBacktestIds.size < backtests.length;
                         }}
-                        className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white hover:bg-red-500 transition-colors"
-                      >
-                        {deleteIds.size > 1 ? `Delete ${deleteIds.size}` : "Confirm"}
-                      </button>
-                      <button
-                        onClick={() => setConfirmingBacktest(false)}
-                        className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      disabled={!canDelete}
-                      title={deleteIds.size > 1 ? `Delete ${deleteIds.size} backtests` : "Delete backtest"}
-                      onClick={() => setConfirmingBacktest(true)}
-                      className="flex items-center gap-1 rounded border border-red-800 p-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                        <path d="M10 11v6" />
-                        <path d="M14 11v6" />
-                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                      </svg>
-                      {deleteIds.size > 1 && (
-                        <span className="text-[10px] font-mono">{deleteIds.size}</span>
-                      )}
-                    </button>
-                  )}
-                  {backtests.length > 0 && (
-                    <input
-                      type="checkbox"
-                      title="Select all"
-                      checked={checkedBacktestIds.size === backtests.length}
-                      ref={(el) => {
-                        if (el) el.indeterminate = checkedBacktestIds.size > 0 && checkedBacktestIds.size < backtests.length;
-                      }}
-                      onChange={(e) => {
-                        if (e.target.checked) setCheckedBacktestIds(new Set(backtests.map((b) => b.id)));
-                        else setCheckedBacktestIds(new Set());
-                      }}
-                      className="h-3 w-3 accent-blue-500 cursor-pointer ml-0.5"
-                    />
-                  )}
+                        onChange={(e) => {
+                          if (e.target.checked) setCheckedBacktestIds(new Set(backtests.map((b) => b.id)));
+                          else setCheckedBacktestIds(new Set());
+                        }}
+                        className="h-3 w-3 accent-blue-500 cursor-pointer ml-0.5"
+                      />
+                    )}
+                  </div>
                 </div>
               );
             })()}
@@ -717,9 +721,10 @@ export default function StrategiesPage() {
                   />
                   <span className="text-xs font-medium text-gray-200">{r.pair}</span>
                   <span className="text-xs text-gray-500">{r.timeframe}</span>
-                  <span className={`text-xs font-medium ml-auto ${r.total_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {r.total_pnl >= 0 ? "+" : ""}${fmt(r.total_pnl, 0)}
-                  </span>
+                  <div className={`ml-auto text-right ${r.total_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    <div className="text-xs font-medium">{r.total_pnl >= 0 ? "+" : ""}${fmt(r.total_pnl, 0)}</div>
+                    <div className="text-[10px] opacity-70">{r.total_pnl >= 0 ? "+" : ""}{(r.total_pnl / 1000).toFixed(2)}%</div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-xs pl-5">
                   <span className="text-gray-400">Sh <span className="font-medium">{fmt(r.sharpe)}</span></span>

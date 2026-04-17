@@ -1,6 +1,7 @@
 "use client";
 
 import { fetchWithAuth } from "@/lib/auth";
+import { loadSettings } from "@/lib/settings";
 import { useEffect, useState } from "react";
 
 // ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ export default function TradeAnalysisSidebar({ backtestRunId, tradeIds, onClose 
             backtest_run_id: backtestRunId,
             trade_ids: tradeIds,
             stats: { selection: statsData.selection, population: statsData.population },
+            model: loadSettings().ai_model,
           }),
         }).then((r) => {
           if (!r.ok) throw new Error(`Analysis failed (${r.status})`);

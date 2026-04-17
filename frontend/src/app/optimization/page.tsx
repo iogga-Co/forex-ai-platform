@@ -511,6 +511,7 @@ function OptimizationPageInner() {
         user_prompt: form.user_prompt,
         max_iterations: parseInt(form.max_iterations, 10),
         time_limit_minutes: parseInt(form.time_limit_minutes, 10),
+        model: cfg.ai_model,
       };
       if (form.target_sharpe) body.target_sharpe = parseFloat(form.target_sharpe);
       if (form.target_win_rate) body.target_win_rate = parseFloat(form.target_win_rate) / 100;

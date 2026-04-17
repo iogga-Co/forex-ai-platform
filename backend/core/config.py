@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     # AI Services
     claude_api_key: str
     voyage_api_key: str
+    gemini_api_key: str = ""
+    openai_api_key: str = ""
 
     # Broker
     oanda_api_key: str

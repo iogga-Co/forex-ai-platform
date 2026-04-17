@@ -62,6 +62,7 @@ class CreateRunRequest(BaseModel):
     time_limit_minutes: int = 60
     target_win_rate: float | None = None
     target_sharpe: float | None = None
+    model: str = "claude-opus-4-6"
 
 
 class RunResponse(BaseModel):
@@ -86,6 +87,7 @@ class RunResponse(BaseModel):
     time_limit_minutes: int
     target_sharpe: float | None
     target_win_rate: float | None
+    model: str
 
 
 # ---------------------------------------------------------------------------
@@ -112,9 +114,9 @@ async def create_run(
                 user_id, pair, timeframe, period_start, period_end,
                 initial_strategy_id, system_prompt, user_prompt,
                 max_iterations, time_limit_minutes,
-                target_win_rate, target_sharpe
+                target_win_rate, target_sharpe, model
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             RETURNING
                 id, status, pair, timeframe,
                 period_start, period_end,
@@ -122,7 +124,7 @@ async def create_run(
                 best_sharpe, best_win_rate, best_iteration, best_strategy_id,
                 stop_reason, created_at,
                 initial_strategy_id, system_prompt, user_prompt,
-                time_limit_minutes, target_sharpe, target_win_rate
+                time_limit_minutes, target_sharpe, target_win_rate, model
             """,
             user.sub,
             payload.pair,
@@ -136,6 +138,7 @@ async def create_run(
             payload.time_limit_minutes,
             payload.target_win_rate,
             payload.target_sharpe,
+            payload.model,
         )
 
     return _row_to_run(run)
@@ -161,7 +164,7 @@ async def list_runs(
                    best_sharpe, best_win_rate, best_iteration, best_strategy_id,
                    stop_reason, created_at,
                    initial_strategy_id, system_prompt, user_prompt,
-                   time_limit_minutes, target_sharpe, target_win_rate
+                   time_limit_minutes, target_sharpe, target_win_rate, model
             FROM optimization_runs
             WHERE user_id = $1
             ORDER BY created_at DESC
@@ -193,7 +196,7 @@ async def get_run(
                    best_sharpe, best_win_rate, best_iteration, best_strategy_id,
                    stop_reason, created_at,
                    initial_strategy_id, system_prompt, user_prompt,
-                   time_limit_minutes, target_sharpe, target_win_rate
+                   time_limit_minutes, target_sharpe, target_win_rate, model
             FROM optimization_runs
             WHERE id = $1 AND user_id = $2
             """,
@@ -469,4 +472,5 @@ def _row_to_run(row) -> RunResponse:
         time_limit_minutes=row["time_limit_minutes"],
         target_sharpe=_f(row["target_sharpe"]),
         target_win_rate=_f(row["target_win_rate"]),
+        model=row["model"] or "claude-opus-4-6",
     )

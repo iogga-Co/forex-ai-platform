@@ -17,6 +17,9 @@ export interface PlatformSettings {
   // Display / shared
   default_pair: string;
   default_timeframe: string;
+
+  // AI model
+  ai_model: string;
 }
 
 export const DEFAULTS: PlatformSettings = {
@@ -28,6 +31,7 @@ export const DEFAULTS: PlatformSettings = {
   default_time_limit_minutes: 60,
   default_pair: "EURUSD",
   default_timeframe: "1H",
+  ai_model: "claude-sonnet-4-6",
 };
 
 const KEY = "platform_settings";
