@@ -37,6 +37,7 @@ yfinance==0.2.51
 # Phase 2 — AI Co-Pilot
 anthropic==0.49.0
 voyageai==0.2.4
+google-genai==1.10.0
 
 # Testing
 pytest==8.3.4

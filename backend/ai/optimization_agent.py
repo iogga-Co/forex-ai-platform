@@ -19,6 +19,7 @@ from typing import Any
 
 import anthropic
 
+from ai.usage import log_usage_sync
 from core.config import settings
 from engine.sir import StrategyIR
 
@@ -370,6 +371,8 @@ def analyze_and_mutate(
             if attempt == MAX_RETRIES - 1:
                 return current_ir, f"Claude API error: {exc}", "no changes"
             continue
+
+        log_usage_sync("claude-opus-4-6", response.usage.input_tokens, response.usage.output_tokens, "optimization")
 
         # Extract text and tool calls from response
         text_parts = [b.text for b in response.content if b.type == "text"]

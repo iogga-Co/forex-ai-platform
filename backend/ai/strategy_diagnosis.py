@@ -26,7 +26,7 @@ async def diagnose_strategy(
     and return structured fix suggestions with ir_patch objects.
     """
     prompt = _build_prompt(strategy_name, pair, timeframe, metrics, trade_stats)
-    raw = await get_full_response([{"role": "user", "content": prompt}])
+    raw = await get_full_response([{"role": "user", "content": prompt}], feature="strategy_diagnosis")
     return _parse_response(raw)
 
 

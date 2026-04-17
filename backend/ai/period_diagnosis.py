@@ -30,7 +30,7 @@ async def diagnose_period(
         }
 
     prompt = _build_prompt(strategy_name, pair, timeframe, trades, news_events or [])
-    raw = await get_full_response([{"role": "user", "content": prompt}])
+    raw = await get_full_response([{"role": "user", "content": prompt}], feature="period_diagnosis")
     return _parse_response(raw)
 
 

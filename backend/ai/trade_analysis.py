@@ -21,7 +21,7 @@ async def analyze_trades(
     stats: dict[str, Any],
 ) -> dict[str, Any]:
     prompt = _build_prompt(strategy_name, pair, timeframe, stats)
-    raw = await get_full_response([{"role": "user", "content": prompt}])
+    raw = await get_full_response([{"role": "user", "content": prompt}], feature="trade_analysis")
     return _parse_response(raw)
 
 

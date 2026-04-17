@@ -17,6 +17,7 @@ from typing import Any
 import anthropic
 from anthropic.types import MessageParam
 
+from ai.usage import log_usage
 from core.config import settings
 from engine.sir import StrategyIR
 
@@ -114,6 +115,7 @@ def _get_client() -> anthropic.AsyncAnthropic:
 async def stream_chat(
     messages: list[MessageParam],
     extra_system_prompt: str = "",
+    feature: str = "copilot",
 ) -> AsyncIterator[str]:
     """
     Stream a conversational response from Claude.
@@ -130,23 +132,29 @@ async def stream_chat(
     if extra_system_prompt.strip():
         system += f"\n\n## Additional instructions from the user\n{extra_system_prompt.strip()}"
     client = _get_client()
+    model = "claude-opus-4-6"
     async with client.messages.stream(
-        model="claude-opus-4-6",
+        model=model,
         max_tokens=4096,
         system=system,
         messages=messages,
     ) as stream:
         async for text in stream.text_stream:
             yield text
+        try:
+            final = await stream.get_final_message()
+            await log_usage(model, final.usage.input_tokens, final.usage.output_tokens, feature)
+        except Exception as exc:
+            logger.warning("Failed to capture stream usage: %s", exc)
 
 
-async def get_full_response(messages: list[MessageParam]) -> str:
+async def get_full_response(messages: list[MessageParam], feature: str = "unknown") -> str:
     """
     Non-streaming version of stream_chat — returns the complete response text.
     Used for summarisation and SIR extraction where we need the full output.
     """
     chunks: list[str] = []
-    async for chunk in stream_chat(messages):
+    async for chunk in stream_chat(messages, feature=feature):
         chunks.append(chunk)
     return "".join(chunks)
 
@@ -196,5 +204,5 @@ async def summarize_backtest(
         f"Pair: {pair} | Timeframe: {timeframe} | Period: {period_start} to {period_end}\n\n"
         f"Metrics:\n{metrics_text}"
     )
-    response = await get_full_response([{"role": "user", "content": prompt}])
+    response = await get_full_response([{"role": "user", "content": prompt}], feature="backtest_summary")
     return response.strip()
