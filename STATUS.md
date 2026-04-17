@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-16 (CI deploy fix, docs update — PRs #79–#84)
+**Last updated:** 2026-04-17 (multi-provider AI model routing, Dockerfile fix — PRs #93–#94)
 
 ---
 
@@ -17,17 +17,19 @@
 
 ---
 
-## Current Staging State (2026-04-16)
+## Current Staging State (2026-04-17)
 
 | Item | Value |
 |---|---|
 | URL | https://trading.iogga-co.com |
 | Health | ✅ 200 OK |
-| Last deployed PR | #83 (CI deploy fix) |
+| Last deployed PR | #94 (Dockerfile pip retries) |
 | Services | All 8 up (nginx, fastapi, celery, nextjs, timescaledb, redis, prometheus, grafana) |
 | OANDA mode | `practice` (demo account, account 001-001-21125823-001) |
 | `LIVE_TRADING_ENABLED` | `false` |
 | Anthropic API | ✅ Key active — credits available |
+| OpenAI API | ✅ Key set (development + staging + production) |
+| Gemini API | ✅ Key set (development + staging + production) |
 | Voyage AI | ✅ 300 RPM / 1M TPM |
 
 ### OHLCV Data Coverage
@@ -580,9 +582,40 @@ Nginx resolves upstream DNS at startup. If nginx restarts while fastapi is tempo
 
 ---
 
+---
+
+## Multi-Provider AI + Dockerfile Fix (2026-04-17)
+
+| PR | Change |
+|---|---|
+| #93 | feat: AI model settings — full multi-provider support (OpenAI GPT-4o/mini, Google Gemini 2.5 Pro/2.0 Flash/lite), `model_router.py` dispatch, optimization agent provider routing, token usage log (`ai_usage_log`), DB migration 016 (`model` column on `optimization_runs`) ✅ merged |
+| #94 | fix: `pip install --retries 5` in Dockerfile — guards against transient SSL download errors on GitHub Actions runner ✅ merged |
+
+### AI model routing design (PR #93)
+
+- `backend/ai/model_router.py` — dispatches `get_full_response` and `stream_chat_copilot` based on model ID prefix (`claude-*` → Anthropic, `gpt-*` → OpenAI, `gemini-*` → Google)
+- `backend/ai/openai_client.py` (new) — async `get_full_response` + `stream_chat`; sync `OpenAI` client for Celery optimization worker
+- `backend/ai/gemini_client.py` (updated) — `_to_gemini_contents` now extracts `system` role messages and passes as `system_instruction`
+- `backend/ai/optimization_agent.py` (rewritten) — three provider branches: `_analyze_claude` (tool use), `_analyze_openai` (function calling + `role:"tool"` retry), `_analyze_gemini` (FunctionDeclaration + FunctionResponse retry)
+- All diagnosis endpoints + Co-Pilot + optimization accept `model` in request body; frontend sends `loadSettings().ai_model`
+- Settings page — all 7 models available with no "requires API key" restriction
+- Doppler secrets `OPENAI_API_KEY` and `GEMINI_API_KEY` set in development + staging + production configs
+
+### Key lessons (PR #93)
+
+- mypy 1.20.1 (CI) is stricter than local — `list[dict]` incompatible with OpenAI `MessageParam` → `# type: ignore[arg-type]` on `messages=` line, not on `create(` line
+- OpenAI streaming uses `create(stream=True, stream_options={"include_usage": True})` not `.stream()` context manager (no typed stubs for the latter)
+- Celery workers are synchronous — use `openai.OpenAI` (sync) and `google.genai.Client` (sync); never `AsyncOpenAI` in task code
+- Tool calling retry patterns differ: Claude uses `tool_result` user messages; OpenAI uses assistant message + `role:"tool"` messages; Gemini uses model content + `FunctionResponse` parts
+
+### Dockerfile transient build failure (PR #94)
+
+`exit code: 2` in CI Docker build was `ssl.SSLError: [SSL] record layer failure` mid-download — a transient network error on the GitHub Actions runner, not a dependency conflict. Fix: `--retries 5` on pip install.
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Merge PR #84 (CLAUDE.md docs) | Low | CI green, awaiting merge |
 | Phase 4 — Live Trading | Next | All 6 pairs loaded (Apr 2021–Apr 2026). All Phase 3 features shipped. Ready to begin. |

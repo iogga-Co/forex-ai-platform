@@ -35,8 +35,9 @@ forex-ai-platform/
 │   ├── engine/           # Backtesting engine (sir.py — SIR schema, parser.py, runner.py,
 │   │                     #   indicators.py, metrics.py, filters.py, sizing.py)
 │   ├── tasks/            # Celery tasks (backtest.py, optimization.py)
-│   ├── ai/               # Claude client, optimization agent, Voyage AI retrieval,
-│   │                     #   strategy_diagnosis.py, trade_analysis.py
+│   ├── ai/               # model_router.py (provider dispatch), claude_client.py,
+│   │                     #   openai_client.py, gemini_client.py, optimization_agent.py,
+│   │                     #   Voyage AI retrieval, strategy_diagnosis.py, trade_analysis.py
 │   ├── core/             # Config, DB pool, auth (JWT)
 │   ├── data/             # OHLCV ingest pipeline, quality checks
 │   └── scripts/          # backfill.py — historical data loader
@@ -166,6 +167,49 @@ PostgreSQL cannot infer the type of unreferenced `$N` parameters. If multiple qu
 
 ---
 
+## AI model routing
+
+`backend/ai/model_router.py` — single entry point for all AI calls. Dispatches to the correct provider based on model ID prefix:
+
+| Prefix | Provider | Client |
+|---|---|---|
+| `claude-*` | Anthropic | `ai/claude_client.py` |
+| `gpt-*` | OpenAI | `ai/openai_client.py` |
+| `gemini-*` | Google | `ai/gemini_client.py` |
+
+Two public async functions:
+- `get_full_response(messages, model, feature)` — used by diagnosis and period analysis
+- `stream_chat_copilot(messages, model, extra_system_prompt, feature)` — used by the Co-Pilot SSE stream
+
+The system prompt is owned by `claude_client._SYSTEM_PROMPT`. For non-Anthropic providers, `model_router` prepends it as the first `{"role":"system"}` message.
+
+### Optimization agent — provider routing
+
+`backend/ai/optimization_agent.py` has three provider-specific functions called by `analyze_and_mutate(..., model=...)`:
+- `_analyze_claude` — Anthropic tool use (original)
+- `_analyze_openai` — OpenAI function calling (`tools=[{"type":"function",...}]`); retry appends `role:"tool"` messages
+- `_analyze_gemini` — Gemini `FunctionDeclaration`; retry appends `FunctionResponse` parts
+
+The Celery optimization task is **synchronous** — uses `openai.OpenAI` (sync) and `google.genai.Client` (sync), not their async variants.
+
+### mypy type ignores for AI clients
+
+- `openai_client.py`: `messages=messages,  # type: ignore[arg-type]` — `list[dict]` is incompatible with OpenAI's typed `MessageParam`
+- `openai_client.py` streaming: `create(  # type: ignore[call-overload]` — stream overload signature differs
+- `optimization_agent.py`: `client.chat.completions.create(  # type: ignore[call-overload]` — sync create overload
+- `model_router.py`: `# type: ignore[arg-type]` on claude `get_full_response` / `stream_chat` calls
+
+### AI provider secrets
+
+`backend/core/config.py` fields: `openai_api_key: str = ""` and `gemini_api_key: str = ""`.  
+Set in all three Doppler configs: `development`, `staging`, `production`.
+
+### Token usage tracking
+
+`db/migrations/015_ai_usage_log.sql` — `ai_usage_log` table records model, feature, input/output token counts for every AI call. Used for 30-day usage monitoring.
+
+---
+
 ## AI Diagnosis endpoints
 
 `backend/routers/diagnosis.py` — prefix `/api/diagnosis`
@@ -177,8 +221,10 @@ PostgreSQL cannot infer the type of unreferenced `$N` parameters. If multiple qu
 | `POST /api/diagnosis/trades/analyze` | AI pattern analysis — takes pre-computed `stats` dict (from `/trades/stats`); calls `ai/trade_analysis.py` → Claude; returns `{headline, patterns, verdict, recommendation}` |
 
 AI modules:
-- `backend/ai/strategy_diagnosis.py` — single-strategy diagnosis prompt + Claude call
-- `backend/ai/trade_analysis.py` — multi-trade pattern analysis prompt + Claude call
+- `backend/ai/strategy_diagnosis.py` — single-strategy diagnosis prompt; dispatches via `model_router.get_full_response`
+- `backend/ai/trade_analysis.py` — multi-trade pattern analysis prompt; dispatches via `model_router.get_full_response`
+
+All three diagnosis request bodies accept a `model: str` field (default `"claude-sonnet-4-6"`). The frontend sends `model: loadSettings().ai_model` from both `DiagnosisSidebar` and `TradeAnalysisSidebar`.
 
 **Two-step fetch pattern for trade analysis:** call `/trades/stats` first, render the stats, then call `/trades/analyze` with the stats dict. This avoids sending raw trade data to Claude and produces tighter prompts.
 
@@ -252,7 +298,7 @@ Do not add Optimize/Refine/View IR navigation buttons to this component — thos
 
 `src/components/TradeAnalysisSidebar.tsx` — props: `backtestRunId`, `tradeIds`, `onClose`
 
-Two-step fetch on mount:
+Two-step fetch on mount — both requests include `model: loadSettings().ai_model`:
 1. POST `/api/diagnosis/trades/stats` → show selection vs population stats table
 2. POST `/api/diagnosis/trades/analyze` → show AI patterns + verdict
 
@@ -274,7 +320,7 @@ Used by the Co-Pilot Story panel and anywhere SIR needs to be rendered as readab
 
 ### DiagnosisSidebar
 
-`src/components/DiagnosisSidebar.tsx` — single-strategy AI diagnosis panel. Opened via the "Diagnose" button in the Strategies tab toolbar. POSTs to `POST /api/diagnosis/strategy` and renders up to 3 structured fix suggestions with `ir_patch` objects.
+`src/components/DiagnosisSidebar.tsx` — single-strategy AI diagnosis panel. Opened via the "Diagnose" button in the Strategies tab toolbar. POSTs to `POST /api/diagnosis/strategy` with `model: loadSettings().ai_model` and renders up to 3 structured fix suggestions with `ir_patch` objects.
 
 ### Co-Pilot IR panel
 
@@ -334,9 +380,10 @@ docker exec forex-ai-platform-timescaledb-1 psql -U forex_user -d forex_db -f /p
 | `strategies` | Strategy records with `ir_json` JSONB |
 | `backtest_runs` | Backtest job metadata AND completed run metrics (sharpe, max_dd, win_rate, trade_count, etc.) |
 | `trades` | Individual trade records (pnl, r_multiple, mae, mfe, entry_time, exit_time, direction) |
-| `optimization_runs` | Optimization session metadata |
+| `optimization_runs` | Optimization session metadata; includes `model VARCHAR(60)` column (migration 016) |
 | `optimization_iterations` | Per-iteration results with `strategy_ir` JSONB |
 | `ohlcv_candles` | TimescaleDB hypertable — 6 pairs × 2 timeframes |
+| `ai_usage_log` | Token usage per AI call — model, feature, input/output counts (migration 015) |
 
 **Note:** There is NO separate `backtest_results` table. `backtest_runs` is the single table for both job metadata and result metrics. All diagnosis/analytics queries use `FROM backtest_runs`.
 
@@ -380,10 +427,11 @@ echo "IMAGE_PREFIX=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper
 - **Deploy order matters:** recreate `fastapi celery` first → `sleep 5` → recreate `nextjs` → `nginx -s reload`. Recreating all simultaneously can leave nginx unable to resolve `fastapi` upstream if nginx restarts during the window when fastapi is gone.
 - **Nginx reload fallback:** `nginx -s reload 2>/dev/null || docker compose up -d --force-recreate nginx` — if nginx crashed, bring it back rather than exiting CI with code 1.
 - **Local main diverges after squash merges** — always create new branches from `origin/main` (`git checkout -b feat/foo origin/main`), never from local `main`.
+- **Docker pip install** — Dockerfile uses `pip install --no-cache-dir --retries 5 -r requirements.txt`. The `--retries 5` guards against transient SSL/network errors on the GitHub Actions runner (`ssl.SSLError: [SSL] record layer failure`).
 
 ### Doppler secrets
 
-Secrets injected at runtime via `doppler run --`. Never hardcode secrets. Configs: `development` (local) and `staging`.
+Secrets injected at runtime via `doppler run --`. Never hardcode secrets. Configs: `development` (local), `staging`, and `production` — all three must be updated when adding new secrets.
 
 ---
 
@@ -392,5 +440,5 @@ Secrets injected at runtime via `doppler run --`. Never hardcode secrets. Config
 - **Broker:** OANDA REST API
 - **Account:** practice (paper trading), `001-001-21125823-001`
 - **`LIVE_TRADING_ENABLED`:** `false` (gated flag, Phase 4)
-- **AI model:** Claude (`claude-sonnet-4-6` or `claude-opus-4-6`)
-- **Embeddings:** Voyage AI (`300 RPM / 1M TPM`)
+- **AI models:** Anthropic Claude (`claude-sonnet-4-6`, `claude-opus-4-6`), OpenAI (`gpt-4o`, `gpt-4o-mini`), Google Gemini (`gemini-2.5-pro`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`) — selected in Settings, routing via `ai/model_router.py`
+- **Embeddings:** Voyage AI (`300 RPM / 1M TPM`) — always uses Voyage regardless of AI model selection
