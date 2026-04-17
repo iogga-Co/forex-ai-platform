@@ -95,7 +95,7 @@ def test_extract_sir_json_fallback():
 async def test_summarize_backtest_returns_string():
     fake_summary = "The strategy performed well in trending markets."
 
-    async def fake_stream(messages):
+    async def fake_stream(messages, **kwargs):
         yield fake_summary
 
     with patch("ai.claude_client.stream_chat", side_effect=fake_stream):
