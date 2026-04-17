@@ -434,11 +434,11 @@ def _analyze_openai(
 
     for attempt in range(MAX_RETRIES):
         try:
-            response = client.chat.completions.create(
+            response = client.chat.completions.create(  # type: ignore[call-overload]
                 model=model,
                 max_tokens=1024,
-                messages=full_messages,  # type: ignore[arg-type]
-                tools=tools,             # type: ignore[arg-type]
+                messages=full_messages,
+                tools=tools,
                 tool_choice="auto",
             )
         except Exception as exc:

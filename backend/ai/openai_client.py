@@ -77,24 +77,20 @@ async def stream_chat(
     total_input = 0
     total_output = 0
     try:
-        async with client.chat.completions.stream(
+        stream = await client.chat.completions.create(
             model=model,
             messages=messages,  # type: ignore[arg-type]
             max_tokens=4096,
-        ) as stream:
-            async for event in stream:
-                for choice in event.choices:
-                    delta = choice.delta.content
-                    if delta:
-                        yield delta
-            # Capture usage from the final completion
-            try:
-                final = await stream.get_final_completion()
-                if final.usage:
-                    total_input = final.usage.prompt_tokens
-                    total_output = final.usage.completion_tokens
-            except Exception:
-                pass
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        async for chunk in stream:  # type: ignore[union-attr]
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+            # Last chunk carries usage when stream_options include_usage=True
+            if chunk.usage:
+                total_input = chunk.usage.prompt_tokens
+                total_output = chunk.usage.completion_tokens
     finally:
         if total_input or total_output:
             try:
