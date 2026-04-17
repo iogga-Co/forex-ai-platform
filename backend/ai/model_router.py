@@ -27,14 +27,13 @@ async def get_full_response(
     """Route a non-streaming AI call to the correct provider."""
     provider = _provider(model)
     if provider == "anthropic":
-        from ai.claude_client import get_full_response as _fn
-        return await _fn(messages, feature=feature)
+        import ai.claude_client as _claude
+        return await _claude.get_full_response(messages, feature=feature)  # type: ignore[arg-type]
     if provider == "openai":
-        from ai.openai_client import get_full_response as _fn
-        return await _fn(messages, model=model, feature=feature)
-    # google
-    from ai.gemini_client import get_full_response as _fn
-    return await _fn(messages, model=model, feature=feature)
+        import ai.openai_client as _openai
+        return await _openai.get_full_response(messages, model=model, feature=feature)
+    import ai.gemini_client as _gemini
+    return await _gemini.get_full_response(messages, model=model, feature=feature)
 
 
 async def stream_chat_copilot(
@@ -50,24 +49,24 @@ async def stream_chat_copilot(
     OpenAI/Gemini receive the same system prompt injected as the first message.
     """
     if _provider(model) == "anthropic":
-        from ai.claude_client import stream_chat
-        async for chunk in stream_chat(messages, extra_system_prompt=extra_system_prompt, feature=feature):
+        import ai.claude_client as _claude
+        async for chunk in _claude.stream_chat(messages, extra_system_prompt=extra_system_prompt, feature=feature):  # type: ignore[arg-type]
             yield chunk
         return
 
     # Non-Claude: inject system prompt as a leading system message
-    from ai.claude_client import _SYSTEM_PROMPT
-    system = _SYSTEM_PROMPT
+    import ai.claude_client as _claude
+    system = _claude._SYSTEM_PROMPT
     if extra_system_prompt.strip():
         system += f"\n\n## Additional instructions from the user\n{extra_system_prompt.strip()}"
 
     full_messages = [{"role": "system", "content": system}] + list(messages)
 
     if _provider(model) == "openai":
-        from ai.openai_client import stream_chat as _stream
-        async for chunk in _stream(full_messages, model=model, feature=feature):
+        import ai.openai_client as _openai
+        async for chunk in _openai.stream_chat(full_messages, model=model, feature=feature):
             yield chunk
     else:
-        from ai.gemini_client import stream_chat as _stream
-        async for chunk in _stream(full_messages, model=model, feature=feature):
+        import ai.gemini_client as _gemini
+        async for chunk in _gemini.stream_chat(full_messages, model=model, feature=feature):
             yield chunk
