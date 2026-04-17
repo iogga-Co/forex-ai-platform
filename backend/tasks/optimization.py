@@ -80,7 +80,7 @@ def _fetch_run(conn: psycopg2.extensions.connection, run_id: str) -> dict | None
                    initial_strategy_id, system_prompt, user_prompt,
                    max_iterations, time_limit_minutes,
                    target_win_rate, target_sharpe,
-                   current_iteration, status
+                   current_iteration, status, model
             FROM optimization_runs
             WHERE id = %s
             """,
@@ -304,6 +304,7 @@ def run_optimization_task(self, run_id: str) -> dict:
         target_sharpe: float | None = float(run["target_sharpe"]) if run["target_sharpe"] else None
         system_prompt: str = run["system_prompt"] or ""
         user_prompt: str = run["user_prompt"] or ""
+        model: str = run.get("model") or "claude-opus-4-6"
 
         # ----------------------------------------------------------------
         # Fetch price data once (reused every iteration)
@@ -442,6 +443,7 @@ def run_optimization_task(self, run_id: str) -> dict:
                 user_prompt=user_prompt,
                 conversation=conversation,
                 extra_context=extra_context,
+                model=model,
             )
 
             # 8. Persist iteration record

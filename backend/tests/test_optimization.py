@@ -104,7 +104,7 @@ class TestApplyToolCall:
         original = copy.deepcopy(MINIMAL_IR)
         from ai.optimization_agent import apply_tool_call
         apply_tool_call(original, "set_period", {"condition_index": 0, "period": 99})
-        assert original["entry_conditions"][0]["period"] == 14
+        assert original["entry_conditions"][0]["period"] == 14  # type: ignore[index]
 
     def test_unknown_tool_is_noop(self):
         original = copy.deepcopy(MINIMAL_IR)
@@ -153,7 +153,8 @@ def _make_text_block(text: str) -> SimpleNamespace:
 
 
 def _make_response(content: list) -> SimpleNamespace:
-    return SimpleNamespace(content=content)
+    usage = SimpleNamespace(input_tokens=10, output_tokens=20)
+    return SimpleNamespace(content=content, usage=usage)
 
 
 class TestAnalyzeAndMutate:
@@ -284,6 +285,7 @@ class TestOptimizationRouter:
             "time_limit_minutes": 60,
             "target_sharpe": None,
             "target_win_rate": None,
+            "model": "claude-opus-4-6",
         }
 
         # Build a mock connection that acts as an async context manager

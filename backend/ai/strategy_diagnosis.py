@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any
 
-from ai.claude_client import get_full_response
+from ai.model_router import get_full_response
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +20,14 @@ async def diagnose_strategy(
     timeframe: str,
     metrics: dict[str, Any],
     trade_stats: dict[str, Any],
+    model: str = "claude-sonnet-4-6",
 ) -> dict[str, Any]:
     """
-    Call Claude to identify the top 3 weaknesses in a backtest result
-    and return structured fix suggestions with ir_patch objects.
+    Call the configured AI model to identify the top 3 weaknesses in a
+    backtest result and return structured fix suggestions with ir_patch objects.
     """
     prompt = _build_prompt(strategy_name, pair, timeframe, metrics, trade_stats)
-    raw = await get_full_response([{"role": "user", "content": prompt}])
+    raw = await get_full_response([{"role": "user", "content": prompt}], model=model, feature="strategy_diagnosis")
     return _parse_response(raw)
 
 

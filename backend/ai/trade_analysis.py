@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any
 
-from ai.claude_client import get_full_response
+from ai.model_router import get_full_response
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +19,10 @@ async def analyze_trades(
     pair: str,
     timeframe: str,
     stats: dict[str, Any],
+    model: str = "claude-sonnet-4-6",
 ) -> dict[str, Any]:
     prompt = _build_prompt(strategy_name, pair, timeframe, stats)
-    raw = await get_full_response([{"role": "user", "content": prompt}])
+    raw = await get_full_response([{"role": "user", "content": prompt}], model=model, feature="trade_analysis")
     return _parse_response(raw)
 
 

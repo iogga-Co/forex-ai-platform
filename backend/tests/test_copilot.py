@@ -95,7 +95,7 @@ def test_extract_sir_json_fallback():
 async def test_summarize_backtest_returns_string():
     fake_summary = "The strategy performed well in trending markets."
 
-    async def fake_stream(messages):
+    async def fake_stream(messages, **kwargs):
         yield fake_summary
 
     with patch("ai.claude_client.stream_chat", side_effect=fake_stream):
@@ -165,7 +165,7 @@ def test_chunk_content_truncated_at_max_chars():
     from routers.copilot import _MAX_CHUNK_CHARS
     long_content = "x" * (_MAX_CHUNK_CHARS + 500)
     chunks = [{"content": long_content, "source": "backtest", "metadata": {}}]
-    truncated = chunks[0]["content"][:_MAX_CHUNK_CHARS]
+    truncated = chunks[0]["content"][:_MAX_CHUNK_CHARS]  # type: ignore[index]
     assert len(truncated) == _MAX_CHUNK_CHARS
 
 

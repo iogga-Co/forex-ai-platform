@@ -1,31 +1,37 @@
 """
-Optimization agent — synchronous Claude client for the optimization Celery task.
+Optimization agent — synchronous AI client for the optimization Celery task.
 
-Uses Claude's tool use API instead of free-form SIR generation.
-Claude can only call narrowly-typed mutation tools; the Anthropic API
-enforces each tool's JSON Schema, making hallucinated fields structurally
-impossible.
+Uses tool use / function calling so the AI can only call narrowly-typed
+mutation tools; the provider API enforces each tool's JSON Schema, making
+hallucinated fields structurally impossible.
 
-Safety layers (see OPTIMIZATION_TAB_PLAN.md §4):
-  1. Tool use — Anthropic API enforces input schemas
+Safety layers:
+  1. Tool use — provider API enforces input schemas
   2. Pydantic StrategyIR validation + up to 3 retries with error feedback
   3. Value clamping inside apply_tool_call (defensive, even if schema holds)
   4. Degenerate detection (0 trades / unchanged results) via build_extra_context
+
+Routing:
+  claude-*   → Anthropic sync client (original implementation)
+  gpt-*      → OpenAI sync client with function calling
+  gemini-*   → Google Gemini sync client with function calling
 """
 
 import copy
+import json
 import logging
 from typing import Any
 
 import anthropic
 
+from ai.usage import log_usage_sync
 from core.config import settings
 from engine.sir import StrategyIR
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Synchronous client (Celery worker is sync)
+# Synchronous Anthropic client (Celery worker is sync)
 # ---------------------------------------------------------------------------
 _sync_client: anthropic.Anthropic | None = None
 
@@ -38,7 +44,7 @@ def _get_client() -> anthropic.Anthropic:
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions — the only mutations Claude may request
+# Tool definitions — the only mutations the AI may request
 # ---------------------------------------------------------------------------
 OPTIMIZATION_TOOLS: list[dict[str, Any]] = [
     {
@@ -171,12 +177,67 @@ OPTIMIZATION_TOOLS: list[dict[str, Any]] = [
 
 
 # ---------------------------------------------------------------------------
+# Tool schema conversion helpers
+# ---------------------------------------------------------------------------
+
+def _tools_for_openai() -> list[dict]:
+    """Convert OPTIMIZATION_TOOLS to OpenAI function calling format."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["input_schema"],
+            },
+        }
+        for t in OPTIMIZATION_TOOLS
+    ]
+
+
+def _tools_for_gemini():
+    """Convert OPTIMIZATION_TOOLS to Gemini FunctionDeclaration format."""
+    from google.genai import types as gtypes
+
+    _type_map = {
+        "integer": gtypes.Type.INTEGER,
+        "number":  gtypes.Type.NUMBER,
+        "string":  gtypes.Type.STRING,
+        "boolean": gtypes.Type.BOOLEAN,
+    }
+
+    def _prop(spec: dict) -> gtypes.Schema:
+        kwargs: dict[str, Any] = {"type": _type_map.get(spec.get("type", "string"), gtypes.Type.STRING)}
+        if "description" in spec:
+            kwargs["description"] = spec["description"]
+        if "enum" in spec:
+            kwargs["enum"] = spec["enum"]
+        return gtypes.Schema(**kwargs)
+
+    declarations = []
+    for t in OPTIMIZATION_TOOLS:
+        s = t["input_schema"]
+        declarations.append(
+            gtypes.FunctionDeclaration(
+                name=t["name"],
+                description=t["description"],
+                parameters=gtypes.Schema(
+                    type=gtypes.Type.OBJECT,
+                    properties={k: _prop(v) for k, v in s["properties"].items()},
+                    required=s.get("required", []),
+                ),
+            )
+        )
+    return [gtypes.Tool(function_declarations=declarations)]
+
+
+# ---------------------------------------------------------------------------
 # Tool application
 # ---------------------------------------------------------------------------
 
 def apply_tool_call(ir: dict, tool_name: str, tool_input: dict) -> dict:
     """
-    Apply a single Claude tool call to a copy of the IR dict.
+    Apply a single tool call to a copy of the IR dict.
     Values are clamped defensively even though the tool schemas enforce ranges.
     Returns the modified copy; never mutates the original.
     """
@@ -201,7 +262,6 @@ def apply_tool_call(ir: dict, tool_name: str, tool_input: dict) -> dict:
         idx = tool_input["condition_index"]
         if 0 <= idx < len(conditions):
             conditions[idx]["operator"] = tool_input["operator"]
-            # price_above / price_below operators must not have a value field
             if tool_input["operator"] in ("price_above", "price_below"):
                 conditions[idx].pop("value", None)
         else:
@@ -237,7 +297,7 @@ def build_extra_context(
     sharpe: float,
     prev_sharpe: float,
 ) -> str:
-    """Return a warning string injected into Claude's next message when results are degenerate."""
+    """Return a warning string injected into the next message when results are degenerate."""
     if trade_count == 0:
         return (
             "\n\nWARNING: The strategy generated 0 trades in this backtest. "
@@ -281,6 +341,278 @@ def _build_system_prompt(user_system_prompt: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Provider-specific implementation: Claude (original)
+# ---------------------------------------------------------------------------
+
+def _analyze_claude(
+    model: str,
+    messages: list[dict],
+    system_prompt: str,
+    current_ir: dict,
+) -> tuple[dict, str, str]:
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = _get_client().messages.create(
+                model=model,
+                max_tokens=1024,
+                system=system_prompt,
+                messages=messages,  # type: ignore[arg-type]
+                tools=OPTIMIZATION_TOOLS,  # type: ignore[arg-type]
+            )
+        except Exception as exc:
+            logger.error("Claude API error on attempt %d: %s", attempt + 1, exc)
+            if attempt == MAX_RETRIES - 1:
+                return current_ir, f"Claude API error: {exc}", "no changes"
+            continue
+
+        log_usage_sync(model, response.usage.input_tokens, response.usage.output_tokens, "optimization")
+
+        text_parts = [b.text for b in response.content if b.type == "text"]
+        tool_calls = [b for b in response.content if b.type == "tool_use"]
+        ai_analysis = "\n".join(text_parts).strip()
+
+        if not tool_calls:
+            return current_ir, ai_analysis, "no changes"
+
+        candidate_ir = current_ir
+        change_descriptions: list[str] = []
+        ai_changes = "no changes"
+        try:
+            for tc in tool_calls:
+                candidate_ir = apply_tool_call(candidate_ir, tc.name, tc.input)  # type: ignore[arg-type]
+                change_descriptions.append(f"{tc.name}({tc.input})")
+            ai_changes = "; ".join(change_descriptions)
+            StrategyIR.model_validate(candidate_ir)
+            logger.info("IR valid after %d attempt(s). Changes: %s", attempt + 1, ai_changes)
+            return candidate_ir, ai_analysis, ai_changes
+        except Exception as validation_exc:
+            logger.warning("IR invalid on attempt %d/%d: %s", attempt + 1, MAX_RETRIES, validation_exc)
+            if attempt < MAX_RETRIES - 1:
+                tool_results = [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "is_error": True,
+                        "content": (
+                            f"The tool was applied but the resulting strategy failed "
+                            f"validation: {validation_exc}. Please revise your parameters."
+                        ),
+                    }
+                    for tc in tool_calls
+                ]
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user", "content": tool_results})
+            else:
+                logger.error("All %d retry attempts failed validation. Keeping prior IR.", MAX_RETRIES)
+                return (
+                    current_ir,
+                    ai_analysis,
+                    f"VALIDATION FAILED after {MAX_RETRIES} retries — kept prior IR. "
+                    f"Attempted: {ai_changes}",
+                )
+
+    return current_ir, "", "no changes"
+
+
+# ---------------------------------------------------------------------------
+# Provider-specific implementation: OpenAI
+# ---------------------------------------------------------------------------
+
+def _analyze_openai(
+    model: str,
+    messages: list[dict],
+    system_prompt: str,
+    current_ir: dict,
+) -> tuple[dict, str, str]:
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    tools = _tools_for_openai()
+
+    # OpenAI takes system as a leading message
+    full_messages: list[dict] = [{"role": "system", "content": system_prompt}] + list(messages)
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.chat.completions.create(  # type: ignore[call-overload]
+                model=model,
+                max_tokens=1024,
+                messages=full_messages,
+                tools=tools,
+                tool_choice="auto",
+            )
+        except Exception as exc:
+            logger.error("OpenAI API error on attempt %d: %s", attempt + 1, exc)
+            if attempt == MAX_RETRIES - 1:
+                return current_ir, f"OpenAI API error: {exc}", "no changes"
+            continue
+
+        if response.usage:
+            log_usage_sync(model, response.usage.prompt_tokens, response.usage.completion_tokens, "optimization")
+
+        msg = response.choices[0].message
+        ai_analysis = msg.content or ""
+        tool_calls = msg.tool_calls or []
+
+        if not tool_calls:
+            return current_ir, ai_analysis, "no changes"
+
+        candidate_ir = current_ir
+        change_descriptions: list[str] = []
+        ai_changes = "no changes"
+        try:
+            for tc in tool_calls:
+                tool_input = json.loads(tc.function.arguments)
+                candidate_ir = apply_tool_call(candidate_ir, tc.function.name, tool_input)
+                change_descriptions.append(f"{tc.function.name}({tool_input})")
+            ai_changes = "; ".join(change_descriptions)
+            StrategyIR.model_validate(candidate_ir)
+            logger.info("OpenAI IR valid after %d attempt(s). Changes: %s", attempt + 1, ai_changes)
+            return candidate_ir, ai_analysis, ai_changes
+        except Exception as validation_exc:
+            logger.warning("OpenAI IR invalid on attempt %d/%d: %s", attempt + 1, MAX_RETRIES, validation_exc)
+            if attempt < MAX_RETRIES - 1:
+                # OpenAI multi-turn: assistant message with tool_calls + tool result messages
+                full_messages.append({
+                    "role": "assistant",
+                    "content": msg.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                        }
+                        for tc in tool_calls
+                    ],
+                })
+                for tc in tool_calls:
+                    full_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": (
+                            f"Validation failed: {validation_exc}. "
+                            "Please revise your parameters."
+                        ),
+                    })
+            else:
+                logger.error("All %d OpenAI retry attempts failed. Keeping prior IR.", MAX_RETRIES)
+                return (
+                    current_ir,
+                    ai_analysis,
+                    f"VALIDATION FAILED after {MAX_RETRIES} retries — kept prior IR. "
+                    f"Attempted: {ai_changes}",
+                )
+
+    return current_ir, "", "no changes"
+
+
+# ---------------------------------------------------------------------------
+# Provider-specific implementation: Gemini
+# ---------------------------------------------------------------------------
+
+def _analyze_gemini(
+    model: str,
+    messages: list[dict],
+    system_prompt: str,
+    current_ir: dict,
+) -> tuple[dict, str, str]:
+    from google import genai
+    from google.genai import types as gtypes
+
+    client = genai.Client(api_key=settings.gemini_api_key)
+    tools = _tools_for_gemini()
+
+    def _to_contents(msgs: list[dict]) -> list[gtypes.Content]:
+        contents = []
+        for m in msgs:
+            if m["role"] == "system":
+                continue
+            role = "user" if m["role"] == "user" else "model"
+            content = m.get("content", "")
+            if isinstance(content, str) and content:
+                contents.append(gtypes.Content(role=role, parts=[gtypes.Part(text=content)]))
+        return contents
+
+    contents = _to_contents(messages)
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=gtypes.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    tools=tools,
+                    max_output_tokens=1024,
+                ),
+            )
+        except Exception as exc:
+            logger.error("Gemini API error on attempt %d: %s", attempt + 1, exc)
+            if attempt == MAX_RETRIES - 1:
+                return current_ir, f"Gemini API error: {exc}", "no changes"
+            continue
+
+        if response.usage_metadata:
+            m = response.usage_metadata
+            log_usage_sync(model, m.prompt_token_count or 0, m.candidates_token_count or 0, "optimization")
+
+        candidate_parts = (
+            response.candidates[0].content.parts
+            if response.candidates and response.candidates[0].content
+            else []
+        )
+        ai_analysis = "\n".join(
+            p.text for p in candidate_parts if hasattr(p, "text") and p.text
+        ).strip()
+        function_calls = [
+            p.function_call
+            for p in candidate_parts
+            if hasattr(p, "function_call") and p.function_call
+        ]
+
+        if not function_calls:
+            return current_ir, ai_analysis, "no changes"
+
+        candidate_ir = current_ir
+        change_descriptions: list[str] = []
+        ai_changes = "no changes"
+        try:
+            for fc in function_calls:
+                tool_input = dict(fc.args)
+                candidate_ir = apply_tool_call(candidate_ir, fc.name, tool_input)
+                change_descriptions.append(f"{fc.name}({tool_input})")
+            ai_changes = "; ".join(change_descriptions)
+            StrategyIR.model_validate(candidate_ir)
+            logger.info("Gemini IR valid after %d attempt(s). Changes: %s", attempt + 1, ai_changes)
+            return candidate_ir, ai_analysis, ai_changes
+        except Exception as validation_exc:
+            logger.warning("Gemini IR invalid on attempt %d/%d: %s", attempt + 1, MAX_RETRIES, validation_exc)
+            if attempt < MAX_RETRIES - 1:
+                # Gemini multi-turn: append model response + function results
+                contents.append(response.candidates[0].content)
+                result_parts = [
+                    gtypes.Part(
+                        function_response=gtypes.FunctionResponse(
+                            name=fc.name,
+                            response={"error": str(validation_exc)},
+                        )
+                    )
+                    for fc in function_calls
+                ]
+                contents.append(gtypes.Content(role="user", parts=result_parts))
+            else:
+                logger.error("All %d Gemini retry attempts failed. Keeping prior IR.", MAX_RETRIES)
+                return (
+                    current_ir,
+                    ai_analysis,
+                    f"VALIDATION FAILED after {MAX_RETRIES} retries — kept prior IR. "
+                    f"Attempted: {ai_changes}",
+                )
+
+    return current_ir, "", "no changes"
+
+
+# ---------------------------------------------------------------------------
 # Analyze and mutate — main entry point
 # ---------------------------------------------------------------------------
 MAX_RETRIES = 3
@@ -295,17 +627,17 @@ def analyze_and_mutate(
     user_prompt: str,
     conversation: list[dict],
     extra_context: str = "",
+    model: str = "claude-opus-4-6",
 ) -> tuple[dict, str, str]:
     """
-    Call Claude synchronously with the current backtest results.
-    Claude responds by calling mutation tools; we apply them to the IR.
+    Call the configured AI model synchronously with the current backtest results.
+    The model responds by calling mutation tools; we apply them to the IR.
 
     Returns:
         (updated_ir, ai_analysis_text, ai_changes_summary)
 
     Falls back to current_ir (unchanged) if all retries fail Pydantic validation.
     """
-    # Build the analysis message content
     conditions_desc = "\n".join(
         f"  [{i}] indicator={c.get('indicator')} period={c.get('period')} "
         f"op={c.get('operator')} value={c.get('value')}"
@@ -317,11 +649,10 @@ def analyze_and_mutate(
 
     trades_text = ""
     if trades_summary:
-        sample = trades_summary[:10]
         trades_text = "\nSample trades (first 10):\n" + "\n".join(
             f"  {t.get('direction','?')} entry={t.get('entry_price')} "
             f"exit={t.get('exit_price')} pnl={t.get('pnl')}"
-            for t in sample
+            for t in trades_summary[:10]
         )
 
     history_text = ""
@@ -329,7 +660,7 @@ def analyze_and_mutate(
         history_text = "\nIteration history:\n" + "\n".join(
             f"  Iter {h['iteration']}: Sharpe={h['sharpe']} WinRate={h['win_rate']} "
             f"Changes: {h['ai_changes']}"
-            for h in iteration_history[-5:]  # last 5 only
+            for h in iteration_history[-5:]
         )
 
     analysis_request = (
@@ -351,85 +682,16 @@ def analyze_and_mutate(
     if user_prompt.strip():
         analysis_request += f"\n\nAdditional instruction: {user_prompt.strip()}"
 
-    # Build message list: prior conversation (last 10 turns for context) + new message
     messages: list[dict] = list(conversation[-10:]) + [
         {"role": "user", "content": analysis_request}
     ]
 
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = _get_client().messages.create(
-                model="claude-opus-4-6",
-                max_tokens=1024,
-                system=_build_system_prompt(user_system_prompt),
-                messages=messages,  # type: ignore[arg-type]
-                tools=OPTIMIZATION_TOOLS,  # type: ignore[arg-type]
-            )
-        except Exception as exc:
-            logger.error("Claude API error on attempt %d: %s", attempt + 1, exc)
-            if attempt == MAX_RETRIES - 1:
-                return current_ir, f"Claude API error: {exc}", "no changes"
-            continue
+    system_prompt = _build_system_prompt(user_system_prompt)
 
-        # Extract text and tool calls from response
-        text_parts = [b.text for b in response.content if b.type == "text"]
-        tool_calls = [b for b in response.content if b.type == "tool_use"]
-        ai_analysis = "\n".join(text_parts).strip()
-
-        if not tool_calls:
-            logger.info("Claude made no tool calls on attempt %d", attempt + 1)
-            # Still valid — no changes this iteration
-            return current_ir, ai_analysis, "no changes"
-
-        # Apply all tool calls sequentially, then validate (Layer 2)
-        # Both apply and validation are inside the same try/except so a bad
-        # tool input (e.g. missing condition_index) triggers a retry instead
-        # of crashing the entire optimization run.
-        candidate_ir = current_ir
-        change_descriptions: list[str] = []
-        ai_changes = "no changes"
-        try:
-            for tc in tool_calls:
-                candidate_ir = apply_tool_call(candidate_ir, tc.name, tc.input)  # type: ignore[arg-type]
-                change_descriptions.append(f"{tc.name}({tc.input})")
-            ai_changes = "; ".join(change_descriptions)
-
-            StrategyIR.model_validate(candidate_ir)
-            logger.info("Iteration IR valid after %d attempt(s). Changes: %s", attempt + 1, ai_changes)
-            return candidate_ir, ai_analysis, ai_changes
-        except Exception as validation_exc:
-            logger.warning(
-                "IR invalid on attempt %d/%d: %s", attempt + 1, MAX_RETRIES, validation_exc
-            )
-            if attempt < MAX_RETRIES - 1:
-                # The Anthropic API requires every tool_use block to be immediately
-                # followed by a user message containing tool_result blocks — a plain
-                # text message is rejected with a 400. Supply proper tool_result blocks
-                # with the error so Claude knows what went wrong.
-                tool_results = [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "is_error": True,
-                        "content": (
-                            f"The tool was applied but the resulting strategy failed "
-                            f"validation: {validation_exc}. Please revise your parameters."
-                        ),
-                    }
-                    for tc in tool_calls
-                ]
-                messages.append({"role": "assistant", "content": response.content})
-                messages.append({"role": "user", "content": tool_results})
-            else:
-                logger.error(
-                    "All %d retry attempts failed validation. Keeping prior IR.", MAX_RETRIES
-                )
-                return (
-                    current_ir,
-                    ai_analysis,
-                    f"VALIDATION FAILED after {MAX_RETRIES} retries — kept prior IR. "
-                    f"Attempted: {ai_changes}",
-                )
-
-    # Should never reach here
-    return current_ir, "", "no changes"
+    # Route to the correct provider
+    if model.startswith("gpt-"):
+        return _analyze_openai(model, messages, system_prompt, current_ir)
+    if model.startswith("gemini-"):
+        return _analyze_gemini(model, messages, system_prompt, current_ir)
+    # Default: Claude (handles claude-* and any unknown model as a safe fallback)
+    return _analyze_claude(model, messages, system_prompt, current_ir)
