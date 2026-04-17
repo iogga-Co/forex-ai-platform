@@ -428,6 +428,7 @@ echo "IMAGE_PREFIX=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper
 - **Nginx reload fallback:** `nginx -s reload 2>/dev/null || docker compose up -d --force-recreate nginx` — if nginx crashed, bring it back rather than exiting CI with code 1.
 - **Local main diverges after squash merges** — always create new branches from `origin/main` (`git checkout -b feat/foo origin/main`), never from local `main`.
 - **Docker pip install** — Dockerfile uses `pip install --no-cache-dir --retries 5 -r requirements.txt`. The `--retries 5` guards against transient SSL/network errors on the GitHub Actions runner (`ssl.SSLError: [SSL] record layer failure`).
+- **CI deploys as root** — both staging and production deploy scripts use `username: root`. Root's `authorized_keys` has the `github-actions-deploy` key. Never use `username: deploy` — if any manual SSH session runs as root and touches the repo, deploy-user `git pull` silently fails due to file ownership conflicts. `set -e` is also present so any deploy step failure aborts loudly.
 
 ### Doppler secrets
 
