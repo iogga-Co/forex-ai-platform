@@ -491,7 +491,7 @@ export default function CopilotPage() {
   }
 
   return (
-    <div className="flex h-full gap-4 -m-6 p-0 overflow-hidden">
+    <div className="flex h-full gap-4 -m-1 p-0 overflow-hidden">
       {/* ------------------------------------------------------------------ */}
       {/* Left — Chat panel                                                    */}
       {/* ------------------------------------------------------------------ */}

@@ -19,11 +19,14 @@ services:
       - ./backend:/app
 
   nextjs:
-    command: npm run dev
+    command: node_modules/.bin/next dev
     environment:
       # Empty so all browser-side API calls use relative paths → nginx on port 80.
       # Doppler injects http://localhost:3000 which is unreachable from the browser.
       NEXT_PUBLIC_API_URL: ""
+      # Polling required on Windows — Docker bind mounts don't propagate inotify events.
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ./frontend:/app
       - nextjs_node_modules:/app/node_modules
