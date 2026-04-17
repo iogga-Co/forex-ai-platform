@@ -184,7 +184,7 @@ async def chat(
             # 5. Stream AI response via the model router
             full_response: list[str] = []
             async for chunk in stream_chat_copilot(
-                messages,
+                messages,  # type: ignore[arg-type]
                 model=payload.model,
                 extra_system_prompt=payload.system_prompt,
             ):

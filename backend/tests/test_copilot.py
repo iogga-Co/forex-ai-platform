@@ -165,7 +165,7 @@ def test_chunk_content_truncated_at_max_chars():
     from routers.copilot import _MAX_CHUNK_CHARS
     long_content = "x" * (_MAX_CHUNK_CHARS + 500)
     chunks = [{"content": long_content, "source": "backtest", "metadata": {}}]
-    truncated = chunks[0]["content"][:_MAX_CHUNK_CHARS]
+    truncated = chunks[0]["content"][:_MAX_CHUNK_CHARS]  # type: ignore[index]
     assert len(truncated) == _MAX_CHUNK_CHARS
 
 

@@ -104,7 +104,7 @@ class TestApplyToolCall:
         original = copy.deepcopy(MINIMAL_IR)
         from ai.optimization_agent import apply_tool_call
         apply_tool_call(original, "set_period", {"condition_index": 0, "period": 99})
-        assert original["entry_conditions"][0]["period"] == 14
+        assert original["entry_conditions"][0]["period"] == 14  # type: ignore[index]
 
     def test_unknown_tool_is_noop(self):
         original = copy.deepcopy(MINIMAL_IR)
