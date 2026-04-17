@@ -152,10 +152,9 @@ function tradeDurationMin(t: Trade): number {
 // ---------------------------------------------------------------------------
 function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="bg-gray-800 rounded-lg px-4 py-3">
-      <p className="text-xs text-gray-400">{label}</p>
-      <p className="text-xl font-semibold text-gray-100 mt-0.5">{value}</p>
-      {sub && <p className="text-xs text-gray-500 mt-0.5">{sub}</p>}
+    <div className="bg-gray-800 rounded-lg px-2 py-1.5 flex items-center gap-1.5">
+      <p className="text-[10px] text-gray-400 whitespace-nowrap">{label}</p>
+      <p className="text-sm font-semibold text-gray-100 leading-none">{value}</p>
     </div>
   );
 }
@@ -475,7 +474,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
     return (
       <div className="space-y-4 animate-pulse">
         <div className="h-5 bg-gray-800 rounded w-40" />
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-8 gap-2">
           {Array.from({ length: 7 }).map((_, i) => (
             <div key={i} className="h-16 bg-gray-800 rounded-lg" />
           ))}
@@ -598,7 +597,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
   // Render
   // ---------------------------------------------------------------------------
   return (
-    <div className="space-y-5">
+    <div className="space-y-2">
 
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
@@ -683,7 +682,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
         const cols = n <= 2 ? "grid-cols-1" : n <= 4 ? "grid-cols-2" : "grid-cols-3";
 
         return (
-          <div className="bg-gray-800 rounded-lg px-3 py-2.5 space-y-2">
+          <div className="bg-gray-800 rounded-lg px-3 py-2 space-y-1.5">
 
             {/* Header row + Story/JSON toggle */}
             <div className="flex items-center justify-between gap-3">
@@ -713,7 +712,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
             {/* Entry conditions */}
             {ir.entry_conditions && ir.entry_conditions.length > 0 && (
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1.5">Entry</p>
+                <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Entry</p>
                 {irView === "story" ? (
                   <div className={`grid ${cols} gap-2`}>
                     {ir.entry_conditions.map((c, i) => (
@@ -777,11 +776,11 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
 
       {/* Health Badges */}
       {healthBadges.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1">
           {healthBadges.map((b) => (
             <span
               key={b.label}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${badgeColours[b.rating]}`}
+              className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium ${badgeColours[b.rating]}`}
             >
               <span className="text-slate-400">{b.label}:</span>
               <span>{b.value}</span>
@@ -791,7 +790,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
       )}
 
       {/* Metric cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-8 gap-2">
         <MetricCard label="Sharpe" value={fmt(m.sharpe)} />
         <MetricCard label="Sortino" value={fmt(m.sortino)} />
         <MetricCard label="Max Drawdown" value={fmtPct(m.max_dd)} />
@@ -801,16 +800,15 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
         <MetricCard
           label="Total P&L"
           value={`$${m.total_pnl.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
-          sub={m.total_pnl >= 0 ? "profit" : "loss"}
         />
         <MetricCard label="Profit Factor" value={fmt(profitFactor)} />
       </div>
 
       {/* Candlestick chart */}
       {candles.length > 0 && (
-        <div className="bg-gray-800 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-gray-300">Price Chart &amp; Trades</h3>
+        <div className="bg-gray-800 rounded-lg p-2">
+          <div className="flex items-center justify-between mb-1.5">
+            <h3 className="text-xs font-medium text-gray-300">Price Chart &amp; Trades</h3>
             <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap justify-end">
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Winning
@@ -852,9 +850,9 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
 
       {/* Equity curve */}
       {equityCurve.length > 0 && (
-        <div className="bg-gray-800 rounded-lg p-4">
-          <h3 className="text-sm font-medium text-gray-300 mb-3">Equity Curve</h3>
-          <ResponsiveContainer width="100%" height={180}>
+        <div className="bg-gray-800 rounded-lg p-2">
+          <h3 className="text-xs font-medium text-gray-300 mb-1.5">Equity Curve</h3>
+          <ResponsiveContainer width="100%" height={130}>
             <LineChart data={equityCurve}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
               <XAxis
@@ -883,9 +881,9 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
 
       {/* Drawdown */}
       {ddPoints.length > 0 && (
-        <div className="bg-gray-800 rounded-lg p-4">
-          <h3 className="text-sm font-medium text-gray-300 mb-3">Drawdown (%)</h3>
-          <ResponsiveContainer width="100%" height={110}>
+        <div className="bg-gray-800 rounded-lg p-2">
+          <h3 className="text-xs font-medium text-gray-300 mb-1.5">Drawdown (%)</h3>
+          <ResponsiveContainer width="100%" height={80}>
             <AreaChart data={ddPoints}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
               <XAxis
@@ -907,11 +905,11 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
       )}
 
       {/* Trade table */}
-      <div className="bg-gray-800 rounded-lg p-4">
+      <div className="bg-gray-800 rounded-lg p-2">
         {/* Toolbar */}
-        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-gray-300">Trades ({filtered.length})</h3>
+            <h3 className="text-xs font-medium text-gray-300">Trades ({filtered.length})</h3>
             {checkedTradeIds.size > 0 && (
               <span className="text-xs text-blue-400">{checkedTradeIds.size} selected</span>
             )}

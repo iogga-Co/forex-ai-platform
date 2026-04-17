@@ -124,6 +124,7 @@ function BacktestPageInner() {
   const [history, setHistory] = useState<RunSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -507,53 +508,70 @@ function BacktestPageInner() {
                   onClick={() => setDiagnosisOpen(true)}
                   className={`${btnBase} ${!sel ? "opacity-30 cursor-not-allowed" : ""}`}
                 >Diagnose</button>
-                {(() => {
-                  const deleteIds = checkedIds.size > 0 ? checkedIds : sel ? new Set([sel.id]) : new Set<string>();
-                  const canDelete = deleteIds.size > 0;
-                  return (
-                    <button
-                      disabled={!canDelete}
-                      title={checkedIds.size > 1 ? `Delete ${checkedIds.size} backtests` : "Delete backtest"}
-                      onClick={async () => {
-                        if (!canDelete) return;
-                        await Promise.allSettled(
-                          [...deleteIds].map((id) =>
-                            fetchWithAuth(`/api/backtest/results/${id}`, { method: "DELETE" })
-                          )
-                        );
-                        setHistory((prev) => prev.filter((r) => !deleteIds.has(r.id)));
-                        if (selectedId && deleteIds.has(selectedId)) setSelectedId(null);
-                        setCheckedIds(new Set());
+                <div className="flex items-center gap-1">
+                  {(() => {
+                    const deleteIds = checkedIds.size > 0 ? checkedIds : sel ? new Set([sel.id]) : new Set<string>();
+                    const canDelete = deleteIds.size > 0;
+                    return confirmingDelete ? (
+                      <div className="flex flex-col gap-0.5">
+                        <button
+                          onClick={async () => {
+                            await Promise.allSettled(
+                              [...deleteIds].map((id) =>
+                                fetchWithAuth(`/api/backtest/results/${id}`, { method: "DELETE" })
+                              )
+                            );
+                            setHistory((prev) => prev.filter((r) => !deleteIds.has(r.id)));
+                            if (selectedId && deleteIds.has(selectedId)) setSelectedId(null);
+                            setCheckedIds(new Set());
+                            setConfirmingDelete(false);
+                          }}
+                          className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white hover:bg-red-500 transition-colors"
+                        >
+                          {deleteIds.size > 1 ? `Delete ${deleteIds.size}` : "Confirm"}
+                        </button>
+                        <button
+                          onClick={() => setConfirmingDelete(false)}
+                          className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        disabled={!canDelete}
+                        title={checkedIds.size > 1 ? `Delete ${checkedIds.size} backtests` : "Delete backtest"}
+                        onClick={() => { if (canDelete) setConfirmingDelete(true); }}
+                        className="flex items-center gap-1 rounded border border-red-800 p-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                          <path d="M10 11v6" /><path d="M14 11v6" />
+                          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                        </svg>
+                        {checkedIds.size > 1 && (
+                          <span className="text-[10px] font-mono">{checkedIds.size}</span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                  {history.length > 0 && (
+                    <input
+                      type="checkbox"
+                      title="Select all"
+                      checked={checkedIds.size === history.length}
+                      ref={(el) => {
+                        if (el) el.indeterminate = checkedIds.size > 0 && checkedIds.size < history.length;
                       }}
-                      className="flex items-center gap-1 rounded border border-red-800 px-1.5 py-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                        <path d="M10 11v6" /><path d="M14 11v6" />
-                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                      </svg>
-                      {checkedIds.size > 1 && (
-                        <span className="text-[10px] font-mono">{checkedIds.size}</span>
-                      )}
-                    </button>
-                  );
-                })()}
-                {history.length > 0 && (
-                  <input
-                    type="checkbox"
-                    title="Select all"
-                    checked={checkedIds.size === history.length}
-                    ref={(el) => {
-                      if (el) el.indeterminate = checkedIds.size > 0 && checkedIds.size < history.length;
-                    }}
-                    onChange={(e) => {
-                      if (e.target.checked) setCheckedIds(new Set(history.map((r) => r.id)));
-                      else setCheckedIds(new Set());
-                    }}
-                    className="h-3 w-3 accent-blue-500 cursor-pointer"
-                  />
-                )}
+                      onChange={(e) => {
+                        if (e.target.checked) setCheckedIds(new Set(history.map((r) => r.id)));
+                        else setCheckedIds(new Set());
+                      }}
+                      className="h-3 w-3 accent-blue-500 cursor-pointer ml-0.5"
+                    />
+                  )}
+                </div>
               </div>
             );
           })()}

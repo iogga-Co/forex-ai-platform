@@ -334,7 +334,7 @@ export default function StrategiesPage() {
   const selectedStrategy = active.find((s) => s.id === selectedStrategyId) ?? null;
 
   return (
-    <div className="flex h-full overflow-hidden -m-6">
+    <div className="flex h-full overflow-hidden -m-1">
 
       {/* ── Left panel: strategy list ── */}
       <div className="w-80 shrink-0 flex flex-col overflow-hidden border-r border-surface-border">

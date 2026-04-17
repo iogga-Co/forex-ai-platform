@@ -9,3 +9,27 @@
 body {
   @apply bg-surface text-gray-100 antialiased;
 }
+
+.px-4 {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.px-3 {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.py-3 {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.px-6 {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.pl-6 {
+  padding-left: 0.5rem;
+}
