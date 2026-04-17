@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchWithAuth } from "@/lib/auth";
+import { loadSettings } from "@/lib/settings";
 import { mergeIrPatch, type StrategyIR } from "@/lib/irPatch";
 
 // ---------------------------------------------------------------------------
@@ -56,7 +57,7 @@ export default function DiagnosisSidebar({
     fetchWithAuth("/api/diagnosis/strategy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ backtest_run_id: backtestRunId }),
+      body: JSON.stringify({ backtest_run_id: backtestRunId, model: loadSettings().ai_model }),
     })
       .then((r) => {
         if (!r.ok) throw new Error(`Diagnosis failed (${r.status})`);

@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any
 
-from ai.claude_client import get_full_response
+from ai.model_router import get_full_response
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ async def diagnose_period(
     timeframe: str,
     trades: list[dict[str, Any]],
     news_events: list[dict[str, Any]] | None = None,
+    model: str = "claude-sonnet-4-6",
 ) -> dict[str, Any]:
     if len(trades) < 2:
         return {
@@ -30,7 +31,7 @@ async def diagnose_period(
         }
 
     prompt = _build_prompt(strategy_name, pair, timeframe, trades, news_events or [])
-    raw = await get_full_response([{"role": "user", "content": prompt}], feature="period_diagnosis")
+    raw = await get_full_response([{"role": "user", "content": prompt}], model=model, feature="period_diagnosis")
     return _parse_response(raw)
 
 

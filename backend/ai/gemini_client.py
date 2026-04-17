@@ -41,10 +41,22 @@ def _get_client() -> genai.Client:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _to_gemini_contents(messages: list[dict]) -> list[gtypes.Content]:
-    """Convert Anthropic-style message list to Gemini Content objects."""
+def _to_gemini_contents(
+    messages: list[dict],
+) -> tuple[list[gtypes.Content], str | None]:
+    """
+    Convert Anthropic-style message list to Gemini Content objects.
+
+    Returns (contents, system_instruction) — system_instruction is extracted
+    from any leading {"role": "system"} message and passed separately to
+    GenerateContentConfig so Gemini treats it correctly.
+    """
+    system_instruction: str | None = None
     contents = []
     for m in messages:
+        if m["role"] == "system":
+            system_instruction = m["content"]
+            continue
         role = "user" if m["role"] == "user" else "model"
         contents.append(
             gtypes.Content(
@@ -52,7 +64,7 @@ def _to_gemini_contents(messages: list[dict]) -> list[gtypes.Content]:
                 parts=[gtypes.Part(text=m["content"])],
             )
         )
-    return contents
+    return contents, system_instruction
 
 
 # ---------------------------------------------------------------------------
@@ -66,12 +78,15 @@ async def get_full_response(
 ) -> str:
     """Non-streaming Gemini response. Returns complete text."""
     client = _get_client()
-    contents = _to_gemini_contents(messages)
+    contents, system_instruction = _to_gemini_contents(messages)
     try:
         response = await client.aio.models.generate_content(
             model=model,
             contents=contents,
-            config=gtypes.GenerateContentConfig(max_output_tokens=4096),
+            config=gtypes.GenerateContentConfig(
+                system_instruction=system_instruction,
+                max_output_tokens=4096,
+            ),
         )
         text = response.text or ""
         # Log usage if available
@@ -96,14 +111,17 @@ async def stream_chat(
 ) -> AsyncIterator[str]:
     """Streaming Gemini response. Yields text deltas."""
     client = _get_client()
-    contents = _to_gemini_contents(messages)
+    contents, system_instruction = _to_gemini_contents(messages)
     total_input = 0
     total_output = 0
     try:
         async for chunk in await client.aio.models.generate_content_stream(
             model=model,
             contents=contents,
-            config=gtypes.GenerateContentConfig(max_output_tokens=4096),
+            config=gtypes.GenerateContentConfig(
+                system_instruction=system_instruction,
+                max_output_tokens=4096,
+            ),
         ):
             if chunk.text:
                 yield chunk.text

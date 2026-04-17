@@ -66,8 +66,8 @@ const AI_MODELS: AIModel[] = [
     output_price: "$10.00",
     best_for: "Strong reasoning, widely trusted",
     pros: "Excellent JSON adherence, strong reasoning",
-    cons: "Requires OpenAI API key setup",
-    available: false,
+    cons: "Smaller context than Claude/Gemini",
+    available: true,
   },
   {
     id: "gpt-4o-mini",
@@ -79,7 +79,7 @@ const AI_MODELS: AIModel[] = [
     best_for: "Very cheap and fast",
     pros: "Lowest cost OpenAI option",
     cons: "Weaker at complex financial reasoning",
-    available: false,
+    available: true,
   },
   {
     id: "gemini-2.5-pro",
@@ -90,8 +90,8 @@ const AI_MODELS: AIModel[] = [
     output_price: "$10.00",
     best_for: "Long context, large trade datasets",
     pros: "Largest context window (1M tokens)",
-    cons: "Requires Google API key setup",
-    available: false,
+    cons: "Slower response times",
+    available: true,
   },
   {
     id: "gemini-2.0-flash",
@@ -102,8 +102,8 @@ const AI_MODELS: AIModel[] = [
     output_price: "$0.40",
     best_for: "Lowest cost overall",
     pros: "Cheapest option by far",
-    cons: "Weakest at structured financial analysis",
-    available: false,
+    cons: "Weaker at structured financial analysis",
+    available: true,
   },
 ];
 
@@ -312,7 +312,7 @@ export default function SettingsPage() {
         </h2>
         <p className="text-xs text-zinc-500 mb-3">
           Choose which AI model powers the Co-Pilot, strategy diagnosis, and optimization.
-          Prices are per 1M tokens. OpenAI and Google models require additional API key configuration.
+          Prices are per 1M tokens.
         </p>
         <div className="overflow-x-auto rounded-lg border border-zinc-700">
           <table className="w-full text-xs text-zinc-300">

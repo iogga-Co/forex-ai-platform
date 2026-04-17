@@ -25,7 +25,8 @@ from pydantic import BaseModel
 
 from anthropic.types import MessageParam
 
-from ai.claude_client import extract_sir_from_response, stream_chat
+from ai.claude_client import extract_sir_from_response
+from ai.model_router import stream_chat_copilot
 from ai.retrieval import retrieve_context
 from ai.voyage_client import embed, embed_query
 from core.auth import TokenData, get_current_user
@@ -49,6 +50,7 @@ class ChatRequest(BaseModel):
     message: str
     strategy_id: UUID | None = None  # strategy currently open in the inspector
     system_prompt: str = ""          # optional extra instructions appended to base system prompt
+    model: str = "claude-opus-4-6"   # AI model to use for this session
 
 
 class TurnResponse(BaseModel):
@@ -179,9 +181,13 @@ async def chat(
             for row in reversed(history_rows):
                 messages.append({"role": row["role"], "content": row["content"]})
 
-            # 5. Stream Claude's response
+            # 5. Stream AI response via the model router
             full_response: list[str] = []
-            async for chunk in stream_chat(messages, extra_system_prompt=payload.system_prompt):
+            async for chunk in stream_chat_copilot(
+                messages,
+                model=payload.model,
+                extra_system_prompt=payload.system_prompt,
+            ):
                 full_response.append(chunk)
                 yield _sse("text", json.dumps(chunk))
 
