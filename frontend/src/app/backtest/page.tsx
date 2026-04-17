@@ -624,9 +624,10 @@ function BacktestPageInner() {
                       />
                       <span className="text-xs font-medium text-gray-200">{r.pair}</span>
                       <span className="text-xs text-gray-500">{r.timeframe}</span>
-                      <span className={`text-xs font-medium ml-auto ${r.total_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                        {r.total_pnl >= 0 ? "+" : ""}${fmt(r.total_pnl, 0)}
-                      </span>
+                      <div className={`ml-auto text-right ${r.total_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        <div className="text-xs font-medium">{r.total_pnl >= 0 ? "+" : ""}${fmt(r.total_pnl, 0)}</div>
+                        <div className="text-[10px] opacity-70">{r.total_pnl >= 0 ? "+" : ""}{(r.total_pnl / 1000).toFixed(2)}%</div>
+                      </div>
                     </div>
                     <div className="flex items-center gap-3 mt-1 text-xs pl-5">
                       <span className="text-gray-300">Sh <span className="font-medium">{fmt(r.sharpe)}</span></span>
