@@ -315,7 +315,7 @@ function BacktestPageInner() {
     <div className="flex h-full gap-0 overflow-hidden">
 
       {/* ── Left panel: form + history ── */}
-      <div className="w-[400px] shrink-0 flex flex-col overflow-y-auto pr-6 border-r border-gray-800">
+      <div className="w-80 shrink-0 flex flex-col overflow-y-auto pr-6 border-r border-gray-800">
 
         {/* Form */}
         <div className="pb-4">

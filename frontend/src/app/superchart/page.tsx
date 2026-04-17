@@ -908,7 +908,7 @@ function SuperchartPageInner() {
         {/* ---------------------------------------------------------------- */}
         {/* Right control panel                                              */}
         {/* ---------------------------------------------------------------- */}
-        <div className="w-72 flex-shrink-0 border-l border-zinc-800 flex flex-col overflow-y-auto">
+        <div className="w-52 flex-shrink-0 border-l border-zinc-800 flex flex-col overflow-y-auto">
 
           {/* Strategy selector */}
           <Section title="Strategy">

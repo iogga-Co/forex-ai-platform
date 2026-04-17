@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchWithAuth } from "@/lib/auth";
 import { loadSettings } from "@/lib/settings";
@@ -229,32 +229,6 @@ function OptimizationPageInner() {
 
   const esRef = useRef<EventSource | null>(null);
 
-  // Resizable left-panel divider
-  const [splitPx, setSplitPx] = useState(260);
-  const asideRef = useRef<HTMLElement>(null);
-  const dragging = useRef(false);
-
-  const onDividerMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragging.current = true;
-  }, []);
-
-  useEffect(() => {
-    function onMouseMove(e: MouseEvent) {
-      if (!dragging.current || !asideRef.current) return;
-      const rect = asideRef.current.getBoundingClientRect();
-      // 49px ≈ header row height; clamp between 80px and (total - 120px for form minimum)
-      const next = Math.max(80, Math.min(rect.height - 120, e.clientY - rect.top - 49));
-      setSplitPx(next);
-    }
-    function onMouseUp() { dragging.current = false; }
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-    return () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-  }, []);
 
   // Load strategies and runs on mount; auto-select any currently running run
   useEffect(() => {
@@ -660,83 +634,12 @@ function OptimizationPageInner() {
   return (
     <div className="flex h-screen bg-zinc-900 text-zinc-200 overflow-hidden">
       {/* ------------------------------------------------------------------ */}
-      {/* Left panel — run list + new run form                                */}
+      {/* Left panel — new run form                                           */}
       {/* ------------------------------------------------------------------ */}
-      <aside ref={asideRef} className="w-80 flex-shrink-0 border-r border-zinc-700 flex flex-col overflow-hidden">
-        <div className="p-4 border-b border-zinc-700 flex-shrink-0">
-          <h2 className="text-sm font-semibold text-zinc-100 uppercase tracking-wide">
-            Optimization Runs
-          </h2>
-        </div>
-
-        {/* Run list — height controlled by drag */}
-        <div style={{ height: splitPx }} className="overflow-y-auto flex-shrink-0">
-          {runs.length === 0 && (
-            <p className="p-4 text-xs text-zinc-500">No runs yet. Create one below.</p>
-          )}
-          {runs.map((run) => (
-            <div
-              key={run.id}
-              onClick={() => selectRun(run)}
-              className={`w-full text-left px-4 py-3 border-b border-zinc-700 hover:bg-zinc-700/50 transition-colors cursor-pointer ${
-                selectedRun?.id === run.id ? "bg-zinc-700" : ""
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono text-zinc-300">
-                  {run.pair} {run.timeframe}
-                </span>
-                <span className={`text-xs font-semibold ${statusColor(run.status)}`}>
-                  {run.status}
-                </span>
-              </div>
-              <div className="text-xs text-zinc-500 mt-0.5">
-                {fmtDate(run.created_at)} · iter {run.current_iteration}/{run.max_iterations}
-              </div>
-              {run.best_sharpe !== null && (
-                <div className="text-xs text-zinc-400 mt-0.5">
-                  Best Sharpe: {fmt(run.best_sharpe)} · WR: {fmtPct(run.best_win_rate)}
-                </div>
-              )}
-              {run.status !== "running" && (
-                <div
-                  className="flex items-center gap-2 mt-2"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    onClick={() => handleResubmit(run)}
-                    className="flex-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded px-2 py-1 transition-colors"
-                  >
-                    Resubmit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(run)}
-                    className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
-                    title="Delete run"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                      <path d="M10 11v6M14 11v6" />
-                      <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Drag handle */}
-        <div
-          onMouseDown={onDividerMouseDown}
-          className="h-1.5 flex-shrink-0 bg-zinc-700 hover:bg-blue-500 active:bg-blue-400 cursor-row-resize transition-colors"
-          title="Drag to resize"
-        />
-
-        {/* New run form — takes remaining space, scrollable */}
+      <aside className="w-52 flex-shrink-0 border-r border-zinc-700 flex flex-col overflow-hidden">
+        {/* New run form — takes full height, scrollable */}
         <div className="flex-1 overflow-y-auto p-3">
-          <h3 className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide mb-0.5">New Run</h3>
+          <h3 className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide mb-2">New Run</h3>
           <form onSubmit={handleSubmit} className="space-y-0.5">
 
             {/* Strategy */}
@@ -915,9 +818,76 @@ function OptimizationPageInner() {
       </aside>
 
       {/* ------------------------------------------------------------------ */}
+      {/* Optimization runs list                                              */}
+      {/* ------------------------------------------------------------------ */}
+      <aside className="w-48 flex-shrink-0 border-r border-zinc-700 flex flex-col overflow-hidden">
+        <div className="px-4 py-3 border-b border-zinc-700 flex-shrink-0">
+          <h2 className="text-xs font-semibold text-zinc-100 uppercase tracking-wide">
+            Optimization Runs
+          </h2>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {runs.length === 0 && (
+            <p className="p-4 text-xs text-zinc-500">No runs yet.</p>
+          )}
+          {runs.map((run) => (
+            <div
+              key={run.id}
+              onClick={() => selectRun(run)}
+              className={`w-full text-left px-4 py-3 border-b border-zinc-700 hover:bg-zinc-700/50 transition-colors cursor-pointer ${
+                selectedRun?.id === run.id ? "bg-zinc-700" : ""
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono text-zinc-300">
+                  {run.pair} {run.timeframe}
+                </span>
+                <span className={`text-xs font-semibold ${statusColor(run.status)}`}>
+                  {run.status}
+                </span>
+              </div>
+              <div className="text-xs text-zinc-500 mt-0.5">
+                {fmtDate(run.created_at)} · {run.current_iteration}/{run.max_iterations} iter
+              </div>
+              {run.best_sharpe !== null && (
+                <div className="text-xs text-zinc-400 mt-0.5">
+                  S: {fmt(run.best_sharpe)} · WR: {fmtPct(run.best_win_rate)}
+                </div>
+              )}
+              {run.status !== "running" && (
+                <div
+                  className="flex items-center gap-2 mt-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => handleResubmit(run)}
+                    className="flex-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded px-2 py-1 transition-colors"
+                  >
+                    Resubmit
+                  </button>
+                  <button
+                    onClick={() => handleDelete(run)}
+                    className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+                    title="Delete run"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                      <path d="M10 11v6M14 11v6" />
+                      <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      {/* ------------------------------------------------------------------ */}
       {/* Main panel — selected run detail                                    */}
       {/* ------------------------------------------------------------------ */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
         {!selectedRun ? (
           <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm">
             Select or start an optimization run.
@@ -1138,6 +1108,7 @@ function OptimizationPageInner() {
           </>
         )}
       </main>
+
     </div>
   );
 }
