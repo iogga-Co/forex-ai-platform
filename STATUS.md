@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-16 (CI deploy fix, docs update — PRs #79–#84)
+**Last updated:** 2026-04-17 (UI layout + Forex News + Gemini + compact UI — PRs #85–#97)
 
 ---
 
@@ -23,7 +23,7 @@
 |---|---|
 | URL | https://trading.iogga-co.com |
 | Health | ✅ 200 OK |
-| Last deployed PR | #83 (CI deploy fix) |
+| Last deployed PR | #97 (compact UI) |
 | Services | All 8 up (nginx, fastapi, celery, nextjs, timescaledb, redis, prometheus, grafana) |
 | OANDA mode | `practice` (demo account, account 001-001-21125823-001) |
 | `LIVE_TRADING_ENABLED` | `false` |
@@ -580,9 +580,85 @@ Nginx resolves upstream DNS at startup. If nginx restarts while fastapi is tempo
 
 ---
 
+## UI Polish Sprint (2026-04-16)
+
+| PR | Change |
+|---|---|
+| #85 | feat: UI polish — checkbox after trash icon, System Prompt textarea, Iteration PnL column, Profit Factor metric ✅ merged |
+| #86 | feat: indicator params editing in Superchart + form density improvements ✅ merged |
+| #87 | fix: ON DELETE SET NULL for optimization FKs to backtest_runs ✅ merged |
+| #88 | chore: gitignore cleanup — `*.nbi`/`*.nbc`, `.claude/`, `backend/data/__pycache__/` ✅ merged |
+
+---
+
+## ForEx News Tab + Period Diagnosis (2026-04-16)
+
+| PR | Change |
+|---|---|
+| #89 | feat: ForEx News tab (`/news`) + `POST /api/diagnosis/period` + `ai/period_diagnosis.py` ✅ merged |
+| #90 | fix: news stale flag — only set when `thisweek` feed fails (not lastweek/nextweek 404s) ✅ merged |
+| #91 | fix: parse ForexFactory new ISO 8601 date format (`2026-04-17T08:30:00-04:00`) ✅ merged |
+
+### ForEx News design (PR #89)
+
+- **DB**: migration `014_news_events.sql` — `news_events` table with `UNIQUE(event_time, currency, title)` constraint
+- **Backend** (`routers/news.py`): `GET /api/news/calendar` — fetches ForexFactory unofficial JSON feed (`lastweek`/`thisweek`/`nextweek`), caches in Redis (TTL 1 h per week label key `news:ff:{label}`), upserts to `news_events`, returns filtered+serialised events with `affected_pairs`, `is_past`, `is_upcoming` fields
+- **Backend** (`routers/diagnosis.py`): `POST /api/diagnosis/period` — accepts `backtest_run_id`, `period_start`, `period_end`, `include_news`; joins trades + optional news events; calls `ai/period_diagnosis.py` → AI model
+- **Frontend**: `src/app/news/page.tsx` — filter bar (currency chips, impact filter, date range); `UpcomingEventsBanner` (next 24 h high-impact, auto-refresh 15 min); `NewsCalendarTable` (sortable by date/currency/impact; impact badges 🔴/🟡/⚪; actual vs forecast colour; affected pair chips)
+- **Nav**: "ForEx News" → `/news` already in Sidebar `NAV_ITEMS`
+
+### ForexFactory feed quirks (PRs #90–#91)
+
+- Feed switched from `"date": "Apr 16, 2025", "time": "8:30am"` to `"date": "2026-04-17T08:30:00-04:00"` (ISO 8601 with ET offset) — `_parse_ff_time()` handles both formats
+- `lastweek`/`nextweek` feeds return 404 when ForexFactory hasn't published them yet — not a real error; `stale=true` only when `thisweek` itself fails
+
+---
+
+## UI Layout + Superchart Overlays (2026-04-17)
+
+| PR | Change |
+|---|---|
+| #92 | feat: UI improvements — sidebar `w-28`, 3-column optimization layout, backtest panel `w-80`, superchart right panel `w-52`, `p-6→p-1` global padding ✅ merged |
+
+### Layout changes (PR #92)
+
+- **Sidebar**: narrowed `w-56 → w-28`; removed phase labels; text `text-[14px] whitespace-nowrap`; padding tightened (`pl-2 pr-1 py-1.5`)
+- **Global layout** (`layout.tsx`): `<main className="p-1">` (was `p-6`) — all pages now have 4 px padding
+- **Optimization**: removed drag divider; 3-column layout `[New Run w-52 | Optimization Runs w-48 | Main flex-1]`
+- **Backtest**: left panel `w-80` (matches Strategies)
+- **Superchart**: right panel `w-52` (was `w-72`)
+- **Co-Pilot + Strategies**: `-m-6 → -m-1` on outer wrapper to cancel global `p-1`
+
+---
+
+## AI Model Settings + Gemini + Token Tracking (2026-04-17)
+
+| PR | Change |
+|---|---|
+| #93 | feat: AI model settings — Gemini provider support (`gemini-2.5-pro`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`), token usage tracking via `ai_usage_log` table ✅ merged |
+| #94 | fix: `pip install --retries 5` in Dockerfile — guards against transient SSL failures on GitHub Actions ✅ merged |
+| #95 | docs: CLAUDE.md + STATUS.md update through PRs #93–#94 ✅ merged |
+
+---
+
+## Compact UI (2026-04-17)
+
+| PR | Change |
+|---|---|
+| #96 | feat: UI layout improvements (sidebar, global padding, optimization 3-column, superchart panel) ✅ merged |
+| #97 | feat: compact UI — global CSS density overrides, MetricCard horizontal layout, backtest delete confirm flow, strategies panel bleed fix ✅ merged |
+
+### Compact UI design (PR #97)
+
+- **`globals.css` density overrides**: `.px-3`, `.px-4`, `.px-6` → `padding-left/right: 0.5rem`; `.pl-6` → `padding-left: 0.5rem`; `.py-3` → `padding-top/bottom: 0.5rem` — intentional global tightening
+- **`BacktestResultPanel` MetricCard**: horizontal `flex items-center gap-1.5` layout — label left, value immediately to its right (was vertical stack; was space-between)
+- **Backtest delete confirm**: stacked Confirm/Cancel buttons (`flex-col gap-0.5`) with select-all checkbox to the right — now matches Strategies tab exactly
+- **Strategies panel**: `-m-6 → -m-1` fix to stop panel bleeding into sidebar (matches Co-Pilot fix from PR #92)
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Merge PR #84 (CLAUDE.md docs) | Low | CI green, awaiting merge |
-| Phase 4 — Live Trading | Next | All 6 pairs loaded (Apr 2021–Apr 2026). All Phase 3 features shipped. Ready to begin. |
+| Phase 4 — Live Trading | Next | All 6 pairs loaded (Apr 2021–Apr 2026). All Phase 3 features + Forex News shipped. Ready to begin. |

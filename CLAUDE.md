@@ -289,6 +289,28 @@ The IR inspector in `copilot/page.tsx` shows:
 
 Backtest / Optimize / Refine buttons live in the **top toolbar** (`ml-auto` div), not the bottom-right corner. Use standard `border-blue-700` button style with `disabled:opacity-30 disabled:cursor-not-allowed`.
 
+### Global CSS density overrides
+
+`src/app/globals.css` overrides Tailwind padding utilities to keep the UI dense:
+
+```css
+.px-3, .px-4, .px-6 { padding-left: 0.5rem; padding-right: 0.5rem; }
+.pl-6               { padding-left: 0.5rem; }
+.py-3               { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+```
+
+Do not remove these — they are intentional. The default Tailwind values produce too much whitespace for this UI.
+
+### Full-viewport page wrapper (`-m-1`)
+
+`<main>` in `layout.tsx` has `p-1`. Pages that need to fill the viewport edge-to-edge (no gap at all sides) cancel it with `-m-1` on their outermost div:
+
+```tsx
+<div className="flex h-full overflow-hidden -m-1">
+```
+
+Currently used by: `strategies/page.tsx`, `copilot/page.tsx`. If global padding ever changes, update all `-m-N` wrappers to match.
+
 ### fetchWithAuth
 
 All API calls use `fetchWithAuth` from `@/lib/auth` — automatically attaches the JWT Bearer token. Never use raw `fetch()` for authenticated endpoints.
@@ -362,6 +384,19 @@ Never add source code bind mounts (`./backend:/app`) to the base `docker-compose
 ### NEXT_PUBLIC_API_URL — local dev
 
 `docker-compose.dev.yml` sets `NEXT_PUBLIC_API_URL: ""` (empty string) on the nextjs service. This forces the browser to use relative URLs routed through nginx — required because Doppler injects `http://localhost:3000` which is only reachable server-side inside the container network, not from the browser.
+
+### Hot reload on Windows (Docker bind mounts)
+
+Next.js with Turbopack (`next dev --turbopack`) ignores `WATCHPACK_POLLING` and `CHOKIDAR_USEPOLLING` — file changes in Windows bind-mounted volumes are never detected. `docker-compose.dev.yml` uses `node_modules/.bin/next dev` (webpack, no Turbopack) with both polling env vars set:
+
+```yaml
+environment:
+  WATCHPACK_POLLING: "true"
+  CHOKIDAR_USEPOLLING: "true"
+command: node_modules/.bin/next dev
+```
+
+Do not switch back to `npm run dev` or add `--turbopack` — hot reload will silently break on Windows.
 
 ### Docker image tags
 
