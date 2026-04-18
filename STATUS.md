@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-17 (multi-provider AI model routing, Dockerfile fix — PRs #93–#94)
+**Last updated:** 2026-04-18 (superchart OSC params, optimization batch delete, story panel redesign, demo seed, Indicator Lab + ML Engine specs — PRs #95–#99)
 
 ---
 
@@ -17,13 +17,13 @@
 
 ---
 
-## Current Staging State (2026-04-17)
+## Current Staging State (2026-04-18)
 
 | Item | Value |
 |---|---|
 | URL | https://trading.iogga-co.com |
 | Health | ✅ 200 OK |
-| Last deployed PR | #94 (Dockerfile pip retries) |
+| Last deployed PR | #99 (superchart OSC params, optimization batch delete, story panel redesign, demo seed) |
 | Services | All 8 up (nginx, fastapi, celery, nextjs, timescaledb, redis, prometheus, grafana) |
 | OANDA mode | `practice` (demo account, account 001-001-21125823-001) |
 | `LIVE_TRADING_ENABLED` | `false` |
@@ -266,26 +266,25 @@ Production smoke test passes (all 9 services healthy). Grafana shows all green. 
 | URL | https://trading.iogga-co.com |
 | Server IP | 86.48.16.255 |
 | Provider | Contabo VPS |
-| Deploy user | `deploy` |
+| Deploy user | `root` |
 | Project path | `/opt/forex-ai-platform` |
 | Secrets | Doppler `staging` config |
 | OANDA mode | `practice` (account 001-001-21125823-001) |
 
 ### Useful commands
 ```bash
-# SSH
-ssh -i ~/.ssh/forex-ai-deploy -o IdentitiesOnly=yes deploy@trading.iogga-co.com
+# SSH (always use IP directly — domain resolves to wrong server for SSH)
+ssh root@86.48.16.255
 
 # Service status
-ssh -i ~/.ssh/forex-ai-deploy -o IdentitiesOnly=yes deploy@trading.iogga-co.com \
-  "docker compose -f /opt/forex-ai-platform/docker-compose.yml ps"
+ssh root@86.48.16.255 "docker compose -f /opt/forex-ai-platform/docker-compose.yml ps"
 
 # FastAPI logs
-ssh -i ~/.ssh/forex-ai-deploy -o IdentitiesOnly=yes deploy@trading.iogga-co.com \
+ssh root@86.48.16.255 \
   "docker compose -f /opt/forex-ai-platform/docker-compose.yml logs fastapi --tail=50"
 
 # Celery logs
-ssh -i ~/.ssh/forex-ai-deploy -o IdentitiesOnly=yes deploy@trading.iogga-co.com \
+ssh root@86.48.16.255 \
   "docker compose -f /opt/forex-ai-platform/docker-compose.yml logs celery --tail=50"
 
 # Health check
@@ -584,6 +583,56 @@ Nginx resolves upstream DNS at startup. If nginx restarts while fastapi is tempo
 
 ---
 
+## UI Polish Sprint (2026-04-16)
+
+| PR | Change |
+|---|---|
+| #85 | feat: UI polish — checkbox after trash icon, System Prompt textarea, Iteration PnL column, Profit Factor metric ✅ merged |
+| #86 | feat: indicator params editing in Superchart + form density improvements ✅ merged |
+| #87 | fix: ON DELETE SET NULL for optimization FKs to backtest_runs ✅ merged |
+| #88 | chore: gitignore cleanup — `*.nbi`/`*.nbc`, `.claude/`, `backend/data/__pycache__/` ✅ merged |
+
+---
+
+## ForEx News Tab + Period Diagnosis (2026-04-16)
+
+| PR | Change |
+|---|---|
+| #89 | feat: ForEx News tab (`/news`) + `POST /api/diagnosis/period` + `ai/period_diagnosis.py` ✅ merged |
+| #90 | fix: news stale flag — only set when `thisweek` feed fails (not lastweek/nextweek 404s) ✅ merged |
+| #91 | fix: parse ForexFactory new ISO 8601 date format (`2026-04-17T08:30:00-04:00`) ✅ merged |
+
+### ForEx News design (PR #89)
+
+- **DB**: migration `014_news_events.sql` — `news_events` table with `UNIQUE(event_time, currency, title)` constraint
+- **Backend** (`routers/news.py`): `GET /api/news/calendar` — fetches ForexFactory unofficial JSON feed (`lastweek`/`thisweek`/`nextweek`), caches in Redis (TTL 1h per week-label key `news:ff:{label}`), upserts to `news_events`, returns filtered + serialised events with `affected_pairs`, `is_past`, `is_upcoming` fields
+- **Backend** (`routers/diagnosis.py`): `POST /api/diagnosis/period` — accepts `backtest_run_id`, `period_start`, `period_end`, `include_news`; joins trades + optional news events; calls `ai/period_diagnosis.py` → AI model
+- **Frontend**: `src/app/news/page.tsx` — filter bar (currency chips, impact filter, date range); `UpcomingEventsBanner` (next 24h high-impact, auto-refresh 15 min); `NewsCalendarTable` (sortable by date/currency/impact; impact badges 🔴/🟡/⚪; actual vs forecast colour; affected pair chips)
+- **Nav**: "ForEx News" → `/news` in Sidebar `NAV_ITEMS`
+
+### ForexFactory feed quirks (PRs #90–#91)
+
+- Feed switched from `"date": "Apr 16, 2025", "time": "8:30am"` to `"date": "2026-04-17T08:30:00-04:00"` (ISO 8601 with ET offset) — `_parse_ff_time()` handles both formats
+- `lastweek`/`nextweek` feeds return 404 when ForexFactory hasn't published them yet — not a real error; `stale=true` only when `thisweek` itself fails
+
+---
+
+## UI Layout + Superchart Overlays (2026-04-17)
+
+| PR | Change |
+|---|---|
+| #92 | feat: UI improvements — sidebar `w-28`, 3-column optimization layout, backtest panel `w-80`, superchart right panel `w-52`, `p-6→p-1` global padding ✅ merged |
+
+### Layout changes (PR #92)
+
+- **Sidebar**: narrowed `w-56 → w-28`; removed phase labels; text `text-[14px] whitespace-nowrap`; padding tightened
+- **Global layout** (`layout.tsx`): `<main className="p-1">` (was `p-6`) — all pages now have 4 px padding
+- **Optimization**: removed drag divider; 3-column layout `[New Run w-52 | Runs w-48 | Main flex-1]`
+- **Backtest**: left panel `w-80`; **Superchart**: right panel `w-52`
+- **Co-Pilot + Strategies**: `-m-6 → -m-1` on outer wrapper to cancel global `p-1`
+
+---
+
 ## Multi-Provider AI + Dockerfile Fix (2026-04-17)
 
 | PR | Change |
@@ -614,8 +663,82 @@ Nginx resolves upstream DNS at startup. If nginx restarts while fastapi is tempo
 
 ---
 
+## Compact UI (2026-04-17)
+
+| PR | Change |
+|---|---|
+| #95 | docs: CLAUDE.md + STATUS.md update through PRs #93–#94 ✅ merged |
+| #96 | feat: UI layout improvements — narrower sidebar, panels, hot reload fix ✅ merged |
+| #97 | feat: compact UI — global CSS density overrides, MetricCard horizontal layout, backtest delete confirm flow, strategies panel bleed fix ✅ merged |
+
+### Compact UI design (PR #97)
+
+- **`globals.css` density overrides**: `.px-3`, `.px-4`, `.px-6` → `padding-left/right: 0.5rem`; `.pl-6` → `padding-left: 0.5rem`; `.py-3` → `padding-top/bottom: 0.5rem` — intentional global tightening, not a bug
+- **MetricCard**: horizontal `flex items-center gap-1.5` layout — label left, value immediately right (was vertical stack)
+- **Backtest delete confirm**: stacked Confirm/Cancel buttons (`flex-col gap-0.5`) with select-all checkbox to the right — matches Strategies tab
+- **Strategies panel**: `-m-6 → -m-1` fix to stop panel bleeding into sidebar
+
+### Hot reload fix (PR #96)
+
+Next.js with Turbopack (`next dev --turbopack`) ignores `WATCHPACK_POLLING` and `CHOKIDAR_USEPOLLING` on Windows Docker bind mounts. Fix: use plain webpack dev server (`node_modules/.bin/next dev`) with both polling env vars set in `docker-compose.dev.yml`. Additionally, `next.config.ts` now sets `webpack.watchOptions.poll: 1000` as a fallback for any environment where env vars alone are insufficient.
+
+---
+
+## Superchart OSC Params + Optimization Batch Delete (2026-04-18)
+
+| PR | Change |
+|---|---|
+| #99 | feat: superchart OSC params, batch delete, story panel redesign, demo seed ✅ merged |
+
+### Changes (PR #99)
+
+**Superchart** (`superchart/page.tsx`):
+- Editable OSC parameters inline in the oscillator tab bar — no separate modal needed
+- OSC control bar moved below the sub-chart canvas
+- Time-based chart sync (use timestamps not bar indices) — fixes candle/indicator offset on all oscillators (STOCH, RSI, ADX)
+
+**BacktestResultPanel** (`components/BacktestResultPanel.tsx`):
+- Story and JSON panels reorganised into compact horizontal Entry/Exit rows
+- Removed pair/timeframe/version header line — info available in the toolbar above
+
+**Optimization page** (`app/optimization/page.tsx`):
+- Batch delete with Select All + trash button for both the Runs list and the Iteration History table
+- Removed "Best Strategy Saved" element and all associated backend/seed code
+- New endpoint: `DELETE /api/optimization/runs/{id}/iterations/{n}` — deletes a single iteration by run ID + iteration number
+
+**Demo seed** (`backend/scripts/seed_demo.py`):
+- 6 optimization runs with full iteration histories and realistic AI analysis text across 4 models (Claude, GPT-4o, Gemini 2.5 Pro, Gemini Flash)
+- `user_id` resolved to the operator account at seed time
+
+**Infrastructure**:
+- `globals.css`: overrides for `text-slate-500`, additional `px-*`/`py-*` padding globals, hide number input spinners (`.no-spinner`)
+- `next.config.ts`: `webpack.watchOptions.poll: 1000` — webpack filesystem polling for Windows Docker hot reload
+
+---
+
+## Indicator Lab + ML Engine Specs (2026-04-18)
+
+Detailed feature specs created in `docs/specs/`:
+
+| Spec | File | Phase |
+|---|---|---|
+| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — next after Phase 4 Live Trading |
+| ML Signal Engine | `docs/specs/ml-engine.md` | 5 — after Live Trading proven |
+
+### Indicator Lab summary
+
+Visual indicator sandbox with two outputs: **Save as Indicator** (named, reusable, overlayable on Superchart) or **Export as Strategy** (full SIR → Backtester). New `saved_indicators` DB table. 8 endpoints in `routers/lab.py`. Superchart gets an "Indicators" overlay panel. ~6–7 PRs.
+
+### ML Signal Engine summary
+
+LightGBM model trained on ~25 tabular indicator features. Single `MLEngine.predict()` shared by backtester and live engine. New `ml_models` registry table. Model management UI in Settings. Chronological train/val split is mandatory. ~8–10 PRs.
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Phase 4 — Live Trading | Next | All 6 pairs loaded (Apr 2021–Apr 2026). All Phase 3 features shipped. Ready to begin. |
+| Phase 4 — Live Trading | Next | All 6 pairs loaded (Apr 2021–Apr 2026). All Phase 3 features + ForEx News shipped. Ready to begin. |
+| Indicator Lab | After Phase 4 | Spec complete — `docs/specs/indicator-lab.md` |
+| ML Signal Engine | Phase 5 | Spec complete — `docs/specs/ml-engine.md` |
