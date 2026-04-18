@@ -503,7 +503,6 @@ def run_optimization_task(self, run_id: str) -> dict:
             "stop_reason": stop_reason,
             "best_iteration": best_iteration,
             "best_sharpe": best_sharpe,
-            "best_strategy_id": best_strategy_id,
         }
 
     except SoftTimeLimitExceeded:
