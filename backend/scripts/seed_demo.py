@@ -309,8 +309,6 @@ def make_candles(pair: str, timeframe: str) -> list[tuple]:
     """Generate realistic OHLCV candles for a pair/timeframe between CANDLE_START and CANDLE_END."""
     step = timedelta(hours=1) if timeframe == "1H" else timedelta(minutes=1)
     base = BASE_PRICES[pair]
-    is_jpy = "JPY" in pair
-
     candles = []
     ts = CANDLE_START
     close = base
