@@ -402,18 +402,18 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
     });
 
     let syncing = false;
-    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
       if (syncing || !range) return;
       syncing = true;
-      oscPairs.forEach(({ chart: c }) => c.timeScale().setVisibleLogicalRange(range));
+      oscPairs.forEach(({ chart: c }) => c.timeScale().setVisibleRange(range));
       syncing = false;
     });
     oscPairs.forEach(({ chart: oscChart }) => {
-      oscChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      oscChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
         if (syncing || !range) return;
         syncing = true;
-        chart.timeScale().setVisibleLogicalRange(range);
-        oscPairs.forEach(({ chart: c }) => { if (c !== oscChart) c.timeScale().setVisibleLogicalRange(range); });
+        chart.timeScale().setVisibleRange(range);
+        oscPairs.forEach(({ chart: c }) => { if (c !== oscChart) c.timeScale().setVisibleRange(range); });
         syncing = false;
       });
     });
@@ -687,89 +687,133 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
             {/* Header row + Story/JSON toggle */}
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs font-medium text-gray-200 truncate">{strategy.description}</p>
-              <div className="flex items-center gap-3 shrink-0">
-                <div className="flex text-[10px]">
-                  {(["story", "json"] as const).map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => setIrView(v)}
-                      className={`px-2 py-0.5 capitalize transition-colors ${
-                        irView === v
-                          ? "text-blue-400 border-b border-blue-500"
-                          : "text-slate-500 hover:text-slate-300"
-                      }`}
-                    >
-                      {v}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-gray-500 font-mono">
-                  {strategy.pair} · {strategy.timeframe} · v{strategy.version}
-                </p>
+              <div className="flex text-[10px] shrink-0">
+                {(["story", "json"] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setIrView(v)}
+                    className={`px-2 py-0.5 capitalize transition-colors ${
+                      irView === v
+                        ? "text-blue-400 border-b border-blue-500"
+                        : "text-slate-500 hover:text-slate-300"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Entry conditions */}
-            {ir.entry_conditions && ir.entry_conditions.length > 0 && (
-              <div>
-                <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Entry</p>
-                {irView === "story" ? (
-                  <div className={`grid ${cols} gap-2`}>
-                    {ir.entry_conditions.map((c, i) => (
-                      <ConditionCard key={i} text={conditionToLabel(c)} />
-                    ))}
+            {irView === "story" ? (
+              /* Story view — two horizontal rows: Entry and Exit */
+              <div className="space-y-1">
+                {ir.entry_conditions && ir.entry_conditions.length > 0 && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-[10px] uppercase tracking-widest text-slate-500 shrink-0 pt-0.5 w-7">Entry</span>
+                    <div className="flex flex-wrap gap-1">
+                      {ir.entry_conditions.map((c, i) => (
+                        <span key={i} className="inline-flex rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] text-slate-200 leading-snug">
+                          {conditionToLabel(c)}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                ) : (
-                  <div className={`grid ${cols} gap-x-4 gap-y-1`}>
-                    {ir.entry_conditions.map((c, i) => {
-                      const params = condParams(c);
-                      return (
-                        <div key={i} className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[10px] font-semibold text-blue-400 font-mono w-10 shrink-0">{c.indicator}</span>
-                          {params.map(({ key, val }) => <Chip key={key} label={key} value={val} />)}
-                          <span className="text-[10px] text-gray-400 italic">{condComparison(c)}</span>
-                        </div>
-                      );
-                    })}
+                )}
+                {(sl || tp || (filters && filterToLabels(filters).length > 0) || sizing?.risk_per_trade_pct != null) && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-[10px] uppercase tracking-widest text-slate-500 shrink-0 pt-0.5 w-7">Exit</span>
+                    <div className="flex flex-wrap gap-1">
+                      {sl && (
+                        <span className="inline-flex rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] text-slate-200 leading-snug">
+                          {exitConditionToLabel("Stop Loss", sl)}
+                        </span>
+                      )}
+                      {tp && (
+                        <span className="inline-flex rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] text-slate-200 leading-snug">
+                          {exitConditionToLabel("Take Profit", tp)}
+                        </span>
+                      )}
+                      {filters && filterToLabels(filters).map((lbl, i) => (
+                        <span key={i} className="inline-flex rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] text-slate-200 leading-snug">
+                          {lbl}
+                        </span>
+                      ))}
+                      {sizing?.risk_per_trade_pct != null && (
+                        <span className="inline-flex rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] text-slate-200 leading-snug">
+                          Risk: {sizing.risk_per_trade_pct}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* JSON view — two horizontal rows: Entry and Exit */
+              <div className="space-y-1">
+                {ir.entry_conditions && ir.entry_conditions.length > 0 && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-[10px] uppercase tracking-widest text-slate-500 shrink-0 pt-0.5 w-7">Entry</span>
+                    <div className="flex flex-wrap gap-1">
+                      {ir.entry_conditions.map((c, i) => {
+                        const params = condParams(c);
+                        return (
+                          <span key={i} className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] leading-snug">
+                            <span className="font-semibold text-blue-400 font-mono">{c.indicator}</span>
+                            {params.map(({ key, val }) => <Chip key={key} label={key} value={val} />)}
+                            <span className="text-gray-400 italic">{condComparison(c)}</span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {(sl || tp || sizing?.risk_per_trade_pct != null || sizing?.max_size_units != null || (filters?.session && filters.session !== "all") || (filters?.exclude_days && filters.exclude_days.length > 0)) && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-[10px] uppercase tracking-widest text-slate-500 shrink-0 pt-0.5 w-7">Exit</span>
+                    <div className="flex flex-wrap gap-1">
+                      {sl && (
+                        <span className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] leading-snug">
+                          <span className="text-gray-400">SL</span>
+                          <span className="font-mono text-gray-200">{stopLabel(sl)}</span>
+                        </span>
+                      )}
+                      {tp && (
+                        <span className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] leading-snug">
+                          <span className="text-gray-400">TP</span>
+                          <span className="font-mono text-gray-200">{stopLabel(tp)}</span>
+                        </span>
+                      )}
+                      {sizing?.risk_per_trade_pct != null && (
+                        <span className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] leading-snug">
+                          <span className="text-gray-400">risk</span>
+                          <span className="font-mono text-gray-200">{sizing.risk_per_trade_pct}%</span>
+                        </span>
+                      )}
+                      {sizing?.max_size_units != null && (
+                        <span className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] leading-snug">
+                          <span className="text-gray-400">size</span>
+                          <span className="font-mono text-gray-200">{sizing.max_size_units.toLocaleString()}</span>
+                        </span>
+                      )}
+                      {filters?.session && filters.session !== "all" && (
+                        <span className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] leading-snug">
+                          <span className="text-gray-400">session</span>
+                          <span className="font-mono text-gray-200">{filters.session}</span>
+                        </span>
+                      )}
+                      {filters?.exclude_days && filters.exclude_days.length > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] leading-snug">
+                          <span className="text-gray-400">excl</span>
+                          <span className="font-mono text-gray-200">{filters.exclude_days.map(d => d.slice(0, 3)).join(",")}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Exit + filters row */}
-            {irView === "story" ? (
-              <div className="flex flex-wrap gap-2 border-t border-gray-700/60 pt-1.5">
-                {sl && <ConditionCard text={exitConditionToLabel("Stop Loss", sl)} />}
-                {tp && <ConditionCard text={exitConditionToLabel("Take Profit", tp)} />}
-                {filters && filterToLabels(filters).map((lbl, i) => (
-                  <ConditionCard key={i} text={lbl} />
-                ))}
-                {sizing?.risk_per_trade_pct != null && (
-                  <ConditionCard text={`Risk per trade: ${sizing.risk_per_trade_pct}%`} />
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 flex-wrap border-t border-gray-700/60 pt-1.5">
-                {sl && (
-                  <><span className="text-[10px] text-gray-400 mr-0.5">SL</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(sl)}</span></>
-                )}
-                {tp && (
-                  <><span className="text-[10px] text-gray-400 ml-1 mr-0.5">TP</span><span className="text-[10px] font-mono text-gray-300">{stopLabel(tp)}</span></>
-                )}
-                {sizing?.risk_per_trade_pct != null && (
-                  <><span className="text-[10px] text-gray-400 ml-1 mr-0.5">risk</span><span className="text-[10px] font-mono text-gray-300">{sizing.risk_per_trade_pct}%</span></>
-                )}
-                {sizing?.max_size_units != null && (
-                  <><span className="text-[10px] text-gray-400 ml-1 mr-0.5">size</span><span className="text-[10px] font-mono text-gray-300">{sizing.max_size_units.toLocaleString()}</span></>
-                )}
-                {filters?.session && filters.session !== "all" && (
-                  <><span className="text-[10px] text-gray-400 ml-1 mr-0.5">session</span><span className="text-[10px] font-mono text-gray-300">{filters.session}</span></>
-                )}
-                {filters?.exclude_days && filters.exclude_days.length > 0 && (
-                  <><span className="text-[10px] text-gray-400 ml-1 mr-0.5">excl</span><span className="text-[10px] font-mono text-gray-300">{filters.exclude_days.map(d => d.slice(0, 3)).join(",")}</span></>
-                )}
-              </div>
-            )}
+
           </div>
         );
       })()}

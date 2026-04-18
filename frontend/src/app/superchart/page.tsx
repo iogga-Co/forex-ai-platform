@@ -107,6 +107,22 @@ const OSC_COLORS = { rsi: "#06b6d4", macdLine: "#3b82f6", macdSig: "#f97316", ma
 type OscTab = "RSI" | "MACD" | "ADX" | "STOCH" | "ATR";
 type IndicatorType = "EMA" | "SMA" | "BB" | "RSI" | "MACD" | "ADX" | "STOCH" | "ATR";
 
+interface OscParams {
+  RSI:   { period: number };
+  MACD:  { fast: number; slow: number; signal_period: number };
+  ADX:   { period: number };
+  STOCH: { period: number; k_smooth: number; d_period: number };
+  ATR:   { period: number };
+}
+
+const DEFAULT_OSC_PARAMS: OscParams = {
+  RSI:   { period: 14 },
+  MACD:  { fast: 12, slow: 26, signal_period: 9 },
+  ADX:   { period: 14 },
+  STOCH: { period: 14, k_smooth: 3, d_period: 3 },
+  ATR:   { period: 14 },
+};
+
 interface ChartOverlay {
   id: string;
   type: IndicatorType;
@@ -211,6 +227,7 @@ function SuperchartPageInner() {
   // --- UI state ---
   const [loadingCandles, setLoadingCandles] = useState(false);
   const [activeOsc, setActiveOsc] = useState<OscTab>("RSI");
+  const [oscParams, setOscParams] = useState<OscParams>(DEFAULT_OSC_PARAMS);
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftError, setDraftError] = useState("");
 
@@ -247,17 +264,17 @@ function SuperchartPageInner() {
     subChartRef.current = sub;
     candleSeriesRef.current = cSeries;
 
-    // Synchronise scroll/zoom between the two charts
-    main.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    // Synchronise scroll/zoom between the two charts by time (not bar index)
+    main.timeScale().subscribeVisibleTimeRangeChange((range) => {
       if (syncingRef.current || !range) return;
       syncingRef.current = true;
-      sub.timeScale().setVisibleLogicalRange(range);
+      try { sub.timeScale().setVisibleRange(range); } catch { /* sub chart may have no data yet */ }
       syncingRef.current = false;
     });
-    sub.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    sub.timeScale().subscribeVisibleTimeRangeChange((range) => {
       if (syncingRef.current || !range) return;
       syncingRef.current = true;
-      main.timeScale().setVisibleLogicalRange(range);
+      try { main.timeScale().setVisibleRange(range); } catch { /* main chart may have no data yet */ }
       syncingRef.current = false;
     });
 
@@ -367,6 +384,24 @@ function SuperchartPageInner() {
       .catch(() => {});
   }, [selectedStratId, strategies]);
 
+  // Sync oscParams from SIR entry conditions when strategy changes
+  useEffect(() => {
+    if (!currentSIR) return;
+    const conds = currentSIR.entry_conditions;
+    setOscParams((prev) => {
+      const next = { ...prev };
+      for (const c of conds) {
+        const ind = c.indicator.toUpperCase() as OscTab;
+        if (ind === "RSI" && c.period)   next.RSI   = { period: c.period };
+        if (ind === "ADX" && c.period)   next.ADX   = { period: c.period };
+        if (ind === "ATR" && c.period)   next.ATR   = { period: c.period };
+        if (ind === "MACD")              next.MACD  = { fast: c.fast ?? 12, slow: c.slow ?? 26, signal_period: c.signal_period ?? 9 };
+        if (ind === "STOCH")             next.STOCH = { period: c.period ?? 14, k_smooth: c.k_smooth ?? 3, d_period: c.d_period ?? 3 };
+      }
+      return next;
+    });
+  }, [currentSIR]);
+
   // ---------------------------------------------------------------------------
   // Load trades when backtest selection changes
   // ---------------------------------------------------------------------------
@@ -467,9 +502,9 @@ function SuperchartPageInner() {
     }
 
     // --- Oscillator sub-chart (based on activeOsc) ---
-    renderOscillator(sub, times, closes, highs, lows, currentSIR, activeOsc);
+    renderOscillator(sub, times, closes, highs, lows, activeOsc, oscParams);
 
-  }, [candles, currentSIR, activeOsc]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [candles, currentSIR, activeOsc, oscParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------------------------------------------------------------------------
   // Render user-added indicator overlays
@@ -585,16 +620,14 @@ function SuperchartPageInner() {
     closes: number[],
     highs: number[],
     lows: number[],
-    sir: StrategyIR,
     osc: OscTab,
+    params: OscParams,
   ) {
     subSeriesRef.current.forEach((s) => sub.removeSeries(s));
     subSeriesRef.current = [];
 
-    const conds = sir.entry_conditions.filter((c) => c.indicator.toUpperCase() === osc);
-
     if (osc === "RSI") {
-      const period = conds[0]?.period ?? 14;
+      const { period } = params.RSI;
       const data = toChartData(times, rsi(closes, period));
       const s = sub.addLineSeries({ color: OSC_COLORS.rsi, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `RSI ${period}` });
       s.setData(data as { time: Time; value: number }[]);
@@ -604,8 +637,7 @@ function SuperchartPageInner() {
       subSeriesRef.current.push(s);
 
     } else if (osc === "MACD") {
-      const cond = conds[0];
-      const fast = cond?.fast ?? 12, slow = cond?.slow ?? 26, sig = cond?.signal_period ?? 9;
+      const { fast, slow, signal_period: sig } = params.MACD;
       const { line, signal, hist } = macd(closes, fast, slow, sig);
       const sLine = sub.addLineSeries({ color: OSC_COLORS.macdLine, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `MACD` });
       const sSig = sub.addLineSeries({ color: OSC_COLORS.macdSig, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `Signal` });
@@ -622,7 +654,7 @@ function SuperchartPageInner() {
       subSeriesRef.current.push(sLine, sSig, sHist);
 
     } else if (osc === "ADX") {
-      const period = conds[0]?.period ?? 14;
+      const { period } = params.ADX;
       const data = toChartData(times, adx(highs, lows, closes, period));
       const s = sub.addLineSeries({ color: OSC_COLORS.adx, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `ADX ${period}` });
       s.setData(data as { time: Time; value: number }[]);
@@ -630,8 +662,7 @@ function SuperchartPageInner() {
       subSeriesRef.current.push(s);
 
     } else if (osc === "STOCH") {
-      const cond = conds[0];
-      const kP = cond?.period ?? 14, kS = cond?.k_smooth ?? 3, dP = cond?.d_period ?? 3;
+      const { period: kP, k_smooth: kS, d_period: dP } = params.STOCH;
       const { k, d } = stochastic(highs, lows, closes, kP, kS, dP);
       const sK = sub.addLineSeries({ color: OSC_COLORS.stochK, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `%K` });
       const sD = sub.addLineSeries({ color: OSC_COLORS.stochD, lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, priceLineVisible: false, title: `%D` });
@@ -642,14 +673,19 @@ function SuperchartPageInner() {
       subSeriesRef.current.push(sK, sD);
 
     } else if (osc === "ATR") {
-      const period = conds[0]?.period ?? 14;
+      const { period } = params.ATR;
       const data = toChartData(times, atr(highs, lows, closes, period));
       const s = sub.addLineSeries({ color: OSC_COLORS.atr, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `ATR ${period}` });
       s.setData(data as { time: Time; value: number }[]);
       subSeriesRef.current.push(s);
     }
 
-    sub.timeScale().fitContent();
+    const mainRange = mainChartRef.current?.timeScale().getVisibleRange();
+    if (mainRange) {
+      try { sub.timeScale().setVisibleRange(mainRange); } catch { /* no data yet */ }
+    } else {
+      sub.timeScale().fitContent();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -873,36 +909,50 @@ function SuperchartPageInner() {
             style={{ minHeight: 0 }}
           />
 
-          {/* Oscillator tab bar */}
-          <div className="flex items-center gap-1 px-2 py-1 border-t border-b border-zinc-800 bg-zinc-900 flex-shrink-0">
-            <span className="text-[10px] text-zinc-600 mr-1">OSC</span>
-            {(["RSI", "MACD", "ADX", "STOCH", "ATR"] as OscTab[]).map((tab) => {
-              const inStrategy = oscillatorsInStrategy.includes(tab);
-              return (
-                <button
-                  key={tab}
-                  onClick={() => setActiveOsc(tab)}
-                  className={[
-                    "text-[10px] px-2 py-0.5 rounded transition-colors",
-                    activeOsc === tab
-                      ? "bg-blue-600 text-white"
-                      : inStrategy
-                        ? "bg-zinc-700 text-zinc-200 hover:bg-zinc-600"
-                        : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700",
-                  ].join(" ")}
-                >
-                  {tab}
-                </button>
-              );
-            })}
-          </div>
-
           {/* Sub oscillator chart */}
           <div
             ref={subDivRef}
             className="flex-shrink-0"
             style={{ height: 160 }}
           />
+
+          {/* OSC tab bar with inline editable params — sits directly under the sub-chart */}
+          <div className="flex items-center gap-0 px-2 py-1 border-t border-zinc-800 bg-zinc-900 flex-shrink-0 overflow-x-auto">
+            <span className="text-[10px] text-zinc-600 mr-2 shrink-0">OSC</span>
+            {(["RSI", "MACD", "ADX", "STOCH", "ATR"] as OscTab[]).map((tab, i) => {
+              const isActive = activeOsc === tab;
+              const inStrategy = oscillatorsInStrategy.includes(tab);
+              const btnCls = [
+                "text-[10px] px-1.5 py-0.5 rounded-l transition-colors shrink-0 font-medium",
+                isActive ? "bg-blue-600 text-white" : inStrategy ? "bg-zinc-700 text-zinc-200 hover:bg-zinc-600" : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700",
+              ].join(" ");
+              const inputCls = [
+                "bg-zinc-900 border-y text-[10px] text-zinc-300 text-center rounded-r focus:outline-none focus:border-blue-500 transition-colors",
+                isActive ? "border-blue-600" : "border-zinc-700",
+              ].join(" ");
+              const numInput = (val: number, onCh: (v: number) => void, w = "w-7") => (
+                <input
+                  type="number" value={val} min={1}
+                  onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 1) onCh(v); }}
+                  onFocus={() => setActiveOsc(tab)}
+                  onClick={(e) => e.stopPropagation()}
+                  className={`${inputCls} ${w} border-x-0 px-0.5 py-0.5`}
+                />
+              );
+              return (
+                <div key={tab} className={`flex items-center ${i > 0 ? "ml-2 pl-2 border-l border-zinc-700" : ""}`}>
+                  <button onClick={() => setActiveOsc(tab)} className={btnCls}>{tab}</button>
+                  <div className={`flex items-center border rounded-r overflow-hidden divide-x divide-zinc-700 ${isActive ? "border-blue-600" : "border-zinc-700"}`} style={{ borderLeft: "none" }}>
+                    {tab === "RSI"   && numInput(oscParams.RSI.period,           (v) => setOscParams((p) => ({ ...p, RSI: { period: v } })))}
+                    {tab === "MACD"  && <>{numInput(oscParams.MACD.fast,          (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, fast: v } })))}{numInput(oscParams.MACD.slow, (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, slow: v } })), "w-8")}{numInput(oscParams.MACD.signal_period, (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, signal_period: v } })))}</>}
+                    {tab === "ADX"   && numInput(oscParams.ADX.period,            (v) => setOscParams((p) => ({ ...p, ADX: { period: v } })))}
+                    {tab === "STOCH" && <>{numInput(oscParams.STOCH.period,       (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, period: v } })))}{numInput(oscParams.STOCH.k_smooth, (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, k_smooth: v } })))}{numInput(oscParams.STOCH.d_period, (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, d_period: v } })))}</>}
+                    {tab === "ATR"   && numInput(oscParams.ATR.period,            (v) => setOscParams((p) => ({ ...p, ATR: { period: v } })))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* ---------------------------------------------------------------- */}

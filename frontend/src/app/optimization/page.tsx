@@ -68,7 +68,6 @@ interface OptRun {
   best_sharpe: number | null;
   best_win_rate: number | null;
   best_iteration: number | null;
-  best_strategy_id: string | null;
   stop_reason: string | null;
   created_at: string;
   initial_strategy_id: string | null;
@@ -147,12 +146,16 @@ function IterationRow({
   iter,
   isBest,
   isSelected,
+  isChecked,
   onSelect,
+  onCheck,
 }: {
   iter: Iteration;
   isBest: boolean;
   isSelected: boolean;
+  isChecked: boolean;
   onSelect: () => void;
+  onCheck: (checked: boolean) => void;
 }) {
   return (
     <tr
@@ -160,12 +163,22 @@ function IterationRow({
         "border-b border-zinc-700 cursor-pointer transition-colors",
         isSelected
           ? "bg-blue-900/40 hover:bg-blue-900/50"
+          : isChecked
+          ? "bg-blue-900/10 border-blue-800"
           : isBest
           ? "bg-green-900/20 hover:bg-zinc-700/40"
           : "hover:bg-zinc-700/40",
       ].join(" ")}
       onClick={onSelect}
     >
+      <td className="px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={(e) => onCheck(e.target.checked)}
+          className="h-3 w-3 accent-blue-500 cursor-pointer"
+        />
+      </td>
       <td className="px-3 py-2 text-center">
         {iter.iteration}
         {isBest && <span className="ml-1 text-green-400 text-xs">★</span>}
@@ -199,11 +212,15 @@ function OptimizationPageInner() {
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [runs, setRuns] = useState<OptRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<OptRun | null>(null);
+  const [checkedRunIds, setCheckedRunIds] = useState<Set<string>>(new Set());
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [iterations, setIterations] = useState<Iteration[]>([]);
   const [liveEvents, setLiveEvents] = useState<SseEvent[]>([]);
   const [selectedIter, setSelectedIter] = useState<Iteration | null>(null);
   const [iterActionBusy, setIterActionBusy] = useState(false);
   const [iterActionError, setIterActionError] = useState<string | null>(null);
+  const [checkedIterIds, setCheckedIterIds] = useState<Set<number>>(new Set());
+  const [confirmingIterDelete, setConfirmingIterDelete] = useState(false);
 
   const cfg = loadSettings();
   const [form, setForm] = useState({
@@ -545,28 +562,23 @@ function OptimizationPageInner() {
     setSelectedRun(null);
   }
 
-  async function handleDelete(run: OptRun) {
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/optimization/runs/${run.id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok && res.status !== 204) {
-        const err = await res.json().catch(() => ({}));
-        console.error("Delete failed:", err.detail ?? `HTTP ${res.status}`);
-        return;
-      }
-      setRuns((prev) => prev.filter((r) => r.id !== run.id));
-      if (selectedRun?.id === run.id) {
-        setSelectedRun(null);
-        setIterations([]);
-        setLiveEvents([]);
-        setSelectedIter(null);
-        esRef.current?.close();
-        esRef.current = null;
-      }
-    } catch {
-      // non-fatal
+  async function handleDelete(ids: Set<string>) {
+    await Promise.allSettled(
+      [...ids].map((id) =>
+        fetchWithAuth(`${API_BASE}/api/optimization/runs/${id}`, { method: "DELETE" })
+      )
+    );
+    setRuns((prev) => prev.filter((r) => !ids.has(r.id)));
+    if (selectedRun && ids.has(selectedRun.id)) {
+      setSelectedRun(null);
+      setIterations([]);
+      setLiveEvents([]);
+      setSelectedIter(null);
+      esRef.current?.close();
+      esRef.current = null;
     }
+    setCheckedRunIds(new Set());
+    setConfirmingDelete(false);
   }
 
   async function saveIterAndNavigate(destination: "backtest" | "optimize" | "refine" | "copilot" | "superchart") {
@@ -821,10 +833,63 @@ function OptimizationPageInner() {
       {/* Optimization runs list                                              */}
       {/* ------------------------------------------------------------------ */}
       <aside className="w-48 flex-shrink-0 border-r border-zinc-700 flex flex-col overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-700 flex-shrink-0">
-          <h2 className="text-xs font-semibold text-zinc-100 uppercase tracking-wide">
-            Optimization Runs
+        <div className="px-3 py-2 border-b border-zinc-700 flex-shrink-0 flex items-center justify-between gap-1">
+          <h2 className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide truncate">
+            Optimization Runs{checkedRunIds.size > 0 ? ` · ${checkedRunIds.size}` : ""}
           </h2>
+          <div className="flex items-center gap-1 shrink-0">
+            {confirmingDelete ? (
+              <div className="flex flex-col gap-0.5">
+                <button
+                  onClick={() => {
+                    const ids = checkedRunIds.size > 0 ? checkedRunIds : selectedRun ? new Set([selectedRun.id]) : new Set<string>();
+                    handleDelete(ids);
+                  }}
+                  className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white hover:bg-red-500 transition-colors"
+                >
+                  {checkedRunIds.size > 1 ? `Delete ${checkedRunIds.size}` : "Confirm"}
+                </button>
+                <button
+                  onClick={() => setConfirmingDelete(false)}
+                  className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                disabled={checkedRunIds.size === 0 && !selectedRun}
+                onClick={() => setConfirmingDelete(true)}
+                className="flex items-center gap-1 rounded border border-red-800 p-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title={checkedRunIds.size > 1 ? `Delete ${checkedRunIds.size} runs` : "Delete run"}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                  <path d="M10 11v6" /><path d="M14 11v6" />
+                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                </svg>
+                {checkedRunIds.size > 1 && (
+                  <span className="text-[10px] font-mono">{checkedRunIds.size}</span>
+                )}
+              </button>
+            )}
+            {runs.length > 0 && (
+              <input
+                type="checkbox"
+                title="Select all"
+                checked={checkedRunIds.size === runs.length && runs.length > 0}
+                ref={(el) => {
+                  if (el) el.indeterminate = checkedRunIds.size > 0 && checkedRunIds.size < runs.length;
+                }}
+                onChange={(e) => {
+                  if (e.target.checked) setCheckedRunIds(new Set(runs.map((r) => r.id)));
+                  else setCheckedRunIds(new Set());
+                }}
+                className="h-3 w-3 accent-blue-500 cursor-pointer"
+              />
+            )}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
           {runs.length === 0 && (
@@ -834,48 +899,55 @@ function OptimizationPageInner() {
             <div
               key={run.id}
               onClick={() => selectRun(run)}
-              className={`w-full text-left px-4 py-3 border-b border-zinc-700 hover:bg-zinc-700/50 transition-colors cursor-pointer ${
-                selectedRun?.id === run.id ? "bg-zinc-700" : ""
+              className={`w-full text-left px-3 py-3 border-b border-zinc-700 hover:bg-zinc-700/50 transition-colors cursor-pointer ${
+                selectedRun?.id === run.id
+                  ? "bg-zinc-700"
+                  : checkedRunIds.has(run.id)
+                  ? "bg-blue-900/10 border-blue-800"
+                  : ""
               }`}
             >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono text-zinc-300">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={checkedRunIds.has(run.id)}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    setCheckedRunIds((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(run.id);
+                      else next.delete(run.id);
+                      return next;
+                    });
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-3 w-3 shrink-0 accent-blue-500 cursor-pointer"
+                />
+                <span className="text-xs font-mono text-zinc-300 truncate">
                   {run.pair} {run.timeframe}
                 </span>
-                <span className={`text-xs font-semibold ${statusColor(run.status)}`}>
+                <span className={`text-xs font-semibold ml-auto shrink-0 ${statusColor(run.status)}`}>
                   {run.status}
                 </span>
               </div>
-              <div className="text-xs text-zinc-500 mt-0.5">
+              <div className="text-xs text-zinc-500 mt-0.5 pl-5">
                 {fmtDate(run.created_at)} · {run.current_iteration}/{run.max_iterations} iter
               </div>
               {run.best_sharpe !== null && (
-                <div className="text-xs text-zinc-400 mt-0.5">
+                <div className="text-xs text-zinc-400 mt-0.5 pl-5">
                   S: {fmt(run.best_sharpe)} · WR: {fmtPct(run.best_win_rate)}
                 </div>
               )}
               {run.status !== "running" && (
                 <div
-                  className="flex items-center gap-2 mt-2"
+                  className="mt-2 pl-5"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button
                     onClick={() => handleResubmit(run)}
-                    className="flex-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded px-2 py-1 transition-colors"
+                    className="w-full text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded px-2 py-1 transition-colors"
                   >
                     Resubmit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(run)}
-                    className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
-                    title="Delete run"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                      <path d="M10 11v6M14 11v6" />
-                      <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
-                    </svg>
                   </button>
                 </div>
               )}
@@ -968,7 +1040,7 @@ function OptimizationPageInner() {
                 <div className="px-6 py-4">
                   <div className="flex items-center justify-between mb-3">
                     <h2 className="text-xs font-semibold text-zinc-400 uppercase">
-                      Iteration History
+                      Iteration History{checkedIterIds.size > 0 ? ` · ${checkedIterIds.size} selected` : ""}
                     </h2>
                     <div className="flex items-center gap-2">
                       {selectedIter && (
@@ -1007,6 +1079,68 @@ function OptimizationPageInner() {
                       {iterActionBusy && (
                         <span className="text-xs text-zinc-400 animate-pulse">Saving…</span>
                       )}
+                      {/* Delete iterations */}
+                      <div className="flex items-center gap-1">
+                        {confirmingIterDelete ? (
+                          <div className="flex flex-col gap-0.5">
+                            <button
+                              onClick={async () => {
+                                const ids = checkedIterIds.size > 0 ? checkedIterIds : selectedIter ? new Set([selectedIter.iteration]) : new Set<number>();
+                                await Promise.allSettled(
+                                  [...ids].map((n) =>
+                                    fetchWithAuth(`${API_BASE}/api/optimization/runs/${selectedRun.id}/iterations/${n}`, { method: "DELETE" })
+                                  )
+                                );
+                                setIterations((prev) => prev.filter((it) => !ids.has(it.iteration)));
+                                if (selectedIter && ids.has(selectedIter.iteration)) setSelectedIter(null);
+                                setCheckedIterIds(new Set());
+                                setConfirmingIterDelete(false);
+                              }}
+                              className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white hover:bg-red-500 transition-colors"
+                            >
+                              {checkedIterIds.size > 1 ? `Delete ${checkedIterIds.size}` : "Confirm"}
+                            </button>
+                            <button
+                              onClick={() => setConfirmingIterDelete(false)}
+                              className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            disabled={checkedIterIds.size === 0 && !selectedIter}
+                            onClick={() => setConfirmingIterDelete(true)}
+                            className="flex items-center gap-1 rounded border border-red-800 p-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            title={checkedIterIds.size > 1 ? `Delete ${checkedIterIds.size} iterations` : "Delete iteration"}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                              <path d="M10 11v6" /><path d="M14 11v6" />
+                              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                            </svg>
+                            {checkedIterIds.size > 1 && (
+                              <span className="text-[10px] font-mono">{checkedIterIds.size}</span>
+                            )}
+                          </button>
+                        )}
+                        {iterations.length > 0 && (
+                          <input
+                            type="checkbox"
+                            title="Select all"
+                            checked={checkedIterIds.size === iterations.length && iterations.length > 0}
+                            ref={(el) => {
+                              if (el) el.indeterminate = checkedIterIds.size > 0 && checkedIterIds.size < iterations.length;
+                            }}
+                            onChange={(e) => {
+                              if (e.target.checked) setCheckedIterIds(new Set(iterations.map((it) => it.iteration)));
+                              else setCheckedIterIds(new Set());
+                            }}
+                            className="h-3 w-3 accent-blue-500 cursor-pointer"
+                          />
+                        )}
+                      </div>
                     </div>
                   </div>
                   {iterActionError && (
@@ -1022,6 +1156,7 @@ function OptimizationPageInner() {
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="text-zinc-400 border-b border-zinc-700">
+                          <th className="px-2 py-2 w-7" />
                           {(["iteration", "sharpe", "win_rate", "max_dd", "trade_count", "total_pnl"] as const).map((col) => {
                             const labels: Record<string, string> = {
                               iteration: "Iter", sharpe: "Sharpe", win_rate: "Win Rate",
@@ -1058,11 +1193,20 @@ function OptimizationPageInner() {
                             iter={iter}
                             isBest={iter.iteration === selectedRun.best_iteration}
                             isSelected={selectedIter?.iteration === iter.iteration}
+                            isChecked={checkedIterIds.has(iter.iteration)}
                             onSelect={() => {
                               setSelectedIter((prev) =>
                                 prev?.iteration === iter.iteration ? null : iter
                               );
                               setIterActionError(null);
+                            }}
+                            onCheck={(checked) => {
+                              setCheckedIterIds((prev) => {
+                                const next = new Set(prev);
+                                if (checked) next.add(iter.iteration);
+                                else next.delete(iter.iteration);
+                                return next;
+                              });
                             }}
                           />
                         ))}
@@ -1086,22 +1230,6 @@ function OptimizationPageInner() {
                     </p>
                   </div>
 
-                  {selectedRun.best_strategy_id && (
-                    <div className="p-3 bg-green-900/20 border border-green-700/40 rounded">
-                      <p className="text-xs font-semibold text-green-300 mb-1">
-                        Best Strategy Saved
-                      </p>
-                      <p className="text-xs text-zinc-400 font-mono break-all">
-                        {selectedRun.best_strategy_id}
-                      </p>
-                      <a
-                        href={`/strategies/${selectedRun.best_strategy_id}`}
-                        className="mt-2 inline-block text-xs text-blue-400 hover:underline"
-                      >
-                        Open in Strategy Inspector →
-                      </a>
-                    </div>
-                  )}
                 </aside>
               )}
             </div>
