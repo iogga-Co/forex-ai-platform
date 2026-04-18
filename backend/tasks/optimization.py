@@ -304,7 +304,6 @@ def run_optimization_task(self, run_id: str) -> dict:
         current_ir = ir_json
         conversation: list[dict] = []
         iteration_history: list[dict] = []
-        best_ir: dict = current_ir
         best_sharpe: float = float("-inf")
         best_win_rate: float = 0.0
         best_backtest_id: str | None = None
@@ -379,7 +378,6 @@ def run_optimization_task(self, run_id: str) -> dict:
                 best_sharpe = sharpe
                 best_win_rate = win_rate
                 best_backtest_id = backtest_run_id
-                best_ir = current_ir
                 best_iteration = iteration
 
                 with data_db.get_sync_conn(settings.database_url) as conn:
