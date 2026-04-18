@@ -185,7 +185,6 @@ def _complete_run(
     conn: psycopg2.extensions.connection,
     run_id: str,
     stop_reason: str,
-    best_strategy_id: str | None,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
@@ -193,11 +192,10 @@ def _complete_run(
             UPDATE optimization_runs
             SET status = 'completed',
                 stop_reason = %s,
-                best_strategy_id = %s,
                 completed_at = NOW()
             WHERE id = %s
             """,
-            (stop_reason, best_strategy_id, run_id),
+            (stop_reason, run_id),
         )
     conn.commit()
 
@@ -213,34 +211,6 @@ def _fail_run(conn: psycopg2.extensions.connection, run_id: str, reason: str) ->
             (reason, run_id),
         )
     conn.commit()
-
-
-def _save_best_strategy(
-    conn: psycopg2.extensions.connection,
-    ir: dict,
-    pair: str,
-    timeframe: str,
-    run_id: str,
-) -> str:
-    """Insert the optimized IR as a new strategy row and return its UUID."""
-    description = (
-        ir.get("metadata", {}).get("description", "")
-        or f"Optimized by AI run {run_id[:8]}"
-    )
-    description = f"[AI-Optimized] {description}"
-
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO strategies (ir_json, description, pair, timeframe, version)
-            VALUES (%s, %s, %s, %s, 1)
-            RETURNING id
-            """,
-            (json.dumps(ir), description, pair, timeframe),
-        )
-        row = cur.fetchone()
-    conn.commit()
-    return str(row[0])
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +304,6 @@ def run_optimization_task(self, run_id: str) -> dict:
         current_ir = ir_json
         conversation: list[dict] = []
         iteration_history: list[dict] = []
-        best_ir: dict = current_ir
         best_sharpe: float = float("-inf")
         best_win_rate: float = 0.0
         best_backtest_id: str | None = None
@@ -409,7 +378,6 @@ def run_optimization_task(self, run_id: str) -> dict:
                 best_sharpe = sharpe
                 best_win_rate = win_rate
                 best_backtest_id = backtest_run_id
-                best_ir = current_ir
                 best_iteration = iteration
 
                 with data_db.get_sync_conn(settings.database_url) as conn:
@@ -510,11 +478,9 @@ def run_optimization_task(self, run_id: str) -> dict:
         # ----------------------------------------------------------------
         # Save best strategy and complete the run
         # ----------------------------------------------------------------
-        best_strategy_id: str | None = None
         if best_backtest_id is not None:
             with data_db.get_sync_conn(settings.database_url) as conn:
-                best_strategy_id = _save_best_strategy(conn, best_ir, pair, timeframe, run_id)
-                _complete_run(conn, run_id, stop_reason, best_strategy_id)
+                _complete_run(conn, run_id, stop_reason)
 
         _publish(r, run_id, "complete", {
             "run_id": run_id,
@@ -522,7 +488,6 @@ def run_optimization_task(self, run_id: str) -> dict:
             "best_iteration": best_iteration,
             "best_sharpe": best_sharpe,
             "best_win_rate": best_win_rate,
-            "best_strategy_id": best_strategy_id,
             "msg": f"Optimization complete ({stop_reason}). Best Sharpe: {best_sharpe:.3f}",
         })
 
@@ -536,7 +501,6 @@ def run_optimization_task(self, run_id: str) -> dict:
             "stop_reason": stop_reason,
             "best_iteration": best_iteration,
             "best_sharpe": best_sharpe,
-            "best_strategy_id": best_strategy_id,
         }
 
     except SoftTimeLimitExceeded:

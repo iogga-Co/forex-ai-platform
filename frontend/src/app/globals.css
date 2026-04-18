@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Hide number input spinners globally */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+
 :root {
   color-scheme: dark;
 }
@@ -32,4 +37,14 @@ body {
 
 .pl-6 {
   padding-left: 0.5rem;
+}
+
+.text-slate-500 {
+  --tw-text-opacity: 1;
+  color: rgb(200 200 200 / var(--tw-text-opacity, 1));
+}
+
+.py-2 {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
 }

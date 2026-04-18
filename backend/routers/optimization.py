@@ -77,7 +77,6 @@ class RunResponse(BaseModel):
     best_sharpe: float | None
     best_win_rate: float | None
     best_iteration: int | None
-    best_strategy_id: str | None
     stop_reason: str | None
     created_at: str
     # Fields needed for Resubmit
@@ -121,7 +120,7 @@ async def create_run(
                 id, status, pair, timeframe,
                 period_start, period_end,
                 max_iterations, current_iteration,
-                best_sharpe, best_win_rate, best_iteration, best_strategy_id,
+                best_sharpe, best_win_rate, best_iteration,
                 stop_reason, created_at,
                 initial_strategy_id, system_prompt, user_prompt,
                 time_limit_minutes, target_sharpe, target_win_rate, model
@@ -161,7 +160,7 @@ async def list_runs(
             SELECT id, status, pair, timeframe,
                    period_start, period_end,
                    max_iterations, current_iteration,
-                   best_sharpe, best_win_rate, best_iteration, best_strategy_id,
+                   best_sharpe, best_win_rate, best_iteration,
                    stop_reason, created_at,
                    initial_strategy_id, system_prompt, user_prompt,
                    time_limit_minutes, target_sharpe, target_win_rate, model
@@ -193,7 +192,7 @@ async def get_run(
             SELECT id, status, pair, timeframe,
                    period_start, period_end,
                    max_iterations, current_iteration,
-                   best_sharpe, best_win_rate, best_iteration, best_strategy_id,
+                   best_sharpe, best_win_rate, best_iteration,
                    stop_reason, created_at,
                    initial_strategy_id, system_prompt, user_prompt,
                    time_limit_minutes, target_sharpe, target_win_rate, model
@@ -447,6 +446,30 @@ async def delete_run(
 
 
 # ---------------------------------------------------------------------------
+# DELETE /api/optimization/runs/{run_id}/iterations/{iteration_number}
+# ---------------------------------------------------------------------------
+
+@router.delete("/runs/{run_id}/iterations/{iteration_number}", status_code=204)
+async def delete_iteration(
+    run_id: UUID,
+    iteration_number: int,
+    user: Annotated[TokenData, Depends(get_current_user)],
+    pool=Depends(get_pool),
+):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT user_id FROM optimization_runs WHERE id = $1", str(run_id)
+        )
+    if row is None or row["user_id"] != user.sub:
+        raise HTTPException(status_code=404, detail="Iteration not found")
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM optimization_iterations WHERE run_id = $1 AND iteration_number = $2",
+            str(run_id), iteration_number,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Internal helper
 # ---------------------------------------------------------------------------
 
@@ -463,7 +486,6 @@ def _row_to_run(row) -> RunResponse:
         best_sharpe=_f(row["best_sharpe"]),
         best_win_rate=_f(row["best_win_rate"]),
         best_iteration=row["best_iteration"],
-        best_strategy_id=str(row["best_strategy_id"]) if row["best_strategy_id"] else None,
         stop_reason=row["stop_reason"],
         created_at=row["created_at"].isoformat(),
         initial_strategy_id=str(row["initial_strategy_id"]) if row["initial_strategy_id"] else None,
