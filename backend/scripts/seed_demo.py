@@ -310,8 +310,6 @@ def make_candles(pair: str, timeframe: str) -> list[tuple]:
     step = timedelta(hours=1) if timeframe == "1H" else timedelta(minutes=1)
     base = BASE_PRICES[pair]
     is_jpy = "JPY" in pair
-    pip = 0.01 if is_jpy else 0.0001
-    spread = pip * (3 if is_jpy else 2)
 
     candles = []
     ts = CANDLE_START
