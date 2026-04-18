@@ -35,16 +35,16 @@ forex-ai-platform/
 │   ├── engine/           # Backtesting engine (sir.py — SIR schema, parser.py, runner.py,
 │   │                     #   indicators.py, metrics.py, filters.py, sizing.py)
 │   ├── tasks/            # Celery tasks (backtest.py, optimization.py)
-│   ├── ai/               # model_router.py (provider dispatch), claude_client.py,
-│   │                     #   openai_client.py, gemini_client.py, optimization_agent.py,
-│   │                     #   Voyage AI retrieval, strategy_diagnosis.py, trade_analysis.py
+│   ├── ai/               # model_router.py (provider dispatch), claude/openai/gemini clients,
+│   │                     #   optimization_agent.py, Voyage AI retrieval,
+│   │                     #   strategy_diagnosis.py, trade_analysis.py, period_diagnosis.py
 │   ├── core/             # Config, DB pool, auth (JWT)
 │   ├── data/             # OHLCV ingest pipeline, quality checks
-│   └── scripts/          # backfill.py — historical data loader
+│   └── scripts/          # backfill.py — historical data loader; seed_demo.py — demo data seed
 ├── frontend/
 │   └── src/
-│       ├── app/          # Next.js pages: backtest, copilot, dashboard, live, login,
-│       │                 #   optimization, settings, strategies, superchart
+│       ├── app/          # Next.js pages: backtest, copilot, dashboard, lab, live, login,
+│       │                 #   news, optimization, settings, strategies, superchart
 │       ├── components/   # BacktestResultPanel, TradeAnalysisSidebar, AuthGuard, etc.
 │       └── lib/          # auth.ts, settings.ts, strategyLabels.ts
 ├── db/migrations/        # SQL migration files (apply manually on existing DB)
@@ -146,6 +146,8 @@ def _dur_min(t): return (t["exit_time"] - t["entry_time"]).total_seconds() / 60
 
 `GET /api/optimization/runs/{run_id}/iterations` returns `strategy_ir` (the full SIR JSON) for each iteration. This is used by the frontend to save an iteration as a new strategy and navigate to Backtest / Optimize / Refine / Superchart.
 
+`DELETE /api/optimization/runs/{run_id}/iterations/{iteration_number}` — deletes a single iteration by run ID + iteration number (1-based). Used by the batch delete flow on the Optimization page.
+
 Pattern in `frontend/src/app/optimization/page.tsx` — `saveIterAndNavigate(destination)`:
 1. POST to `/api/strategies` with the iteration's `strategy_ir` and a generated name (`[Opt iter N] PAIR TF`)
 2. On success, `router.push(destination URL)` with `strategy_id=<new_id>` plus run params pre-filled
@@ -169,44 +171,13 @@ PostgreSQL cannot infer the type of unreferenced `$N` parameters. If multiple qu
 
 ## AI model routing
 
-`backend/ai/model_router.py` — single entry point for all AI calls. Dispatches to the correct provider based on model ID prefix:
+`backend/ai/model_router.py` — single entry point. Dispatches based on model ID prefix:
+`claude-*` → Anthropic, `gpt-*` → OpenAI, `gemini-*` → Google.
 
-| Prefix | Provider | Client |
-|---|---|---|
-| `claude-*` | Anthropic | `ai/claude_client.py` |
-| `gpt-*` | OpenAI | `ai/openai_client.py` |
-| `gemini-*` | Google | `ai/gemini_client.py` |
+Two public async functions: `get_full_response` (diagnosis, period analysis) and
+`stream_chat_copilot` (Co-Pilot SSE). Celery tasks use the sync variants of OpenAI/Gemini clients.
 
-Two public async functions:
-- `get_full_response(messages, model, feature)` — used by diagnosis and period analysis
-- `stream_chat_copilot(messages, model, extra_system_prompt, feature)` — used by the Co-Pilot SSE stream
-
-The system prompt is owned by `claude_client._SYSTEM_PROMPT`. For non-Anthropic providers, `model_router` prepends it as the first `{"role":"system"}` message.
-
-### Optimization agent — provider routing
-
-`backend/ai/optimization_agent.py` has three provider-specific functions called by `analyze_and_mutate(..., model=...)`:
-- `_analyze_claude` — Anthropic tool use (original)
-- `_analyze_openai` — OpenAI function calling (`tools=[{"type":"function",...}]`); retry appends `role:"tool"` messages
-- `_analyze_gemini` — Gemini `FunctionDeclaration`; retry appends `FunctionResponse` parts
-
-The Celery optimization task is **synchronous** — uses `openai.OpenAI` (sync) and `google.genai.Client` (sync), not their async variants.
-
-### mypy type ignores for AI clients
-
-- `openai_client.py`: `messages=messages,  # type: ignore[arg-type]` — `list[dict]` is incompatible with OpenAI's typed `MessageParam`
-- `openai_client.py` streaming: `create(  # type: ignore[call-overload]` — stream overload signature differs
-- `optimization_agent.py`: `client.chat.completions.create(  # type: ignore[call-overload]` — sync create overload
-- `model_router.py`: `# type: ignore[arg-type]` on claude `get_full_response` / `stream_chat` calls
-
-### AI provider secrets
-
-`backend/core/config.py` fields: `openai_api_key: str = ""` and `gemini_api_key: str = ""`.  
-Set in all three Doppler configs: `development`, `staging`, `production`.
-
-### Token usage tracking
-
-`db/migrations/015_ai_usage_log.sql` — `ai_usage_log` table records model, feature, input/output token counts for every AI call. Used for 30-day usage monitoring.
+Token usage logged to `ai_usage_log` table (migration 015) — model, feature, input/output counts.
 
 ---
 
@@ -221,10 +192,11 @@ Set in all three Doppler configs: `development`, `staging`, `production`.
 | `POST /api/diagnosis/trades/analyze` | AI pattern analysis — takes pre-computed `stats` dict (from `/trades/stats`); calls `ai/trade_analysis.py` → Claude; returns `{headline, patterns, verdict, recommendation}` |
 
 AI modules:
-- `backend/ai/strategy_diagnosis.py` — single-strategy diagnosis prompt; dispatches via `model_router.get_full_response`
-- `backend/ai/trade_analysis.py` — multi-trade pattern analysis prompt; dispatches via `model_router.get_full_response`
+- `backend/ai/strategy_diagnosis.py` — single-strategy diagnosis prompt; dispatches via `model_router`
+- `backend/ai/trade_analysis.py` — multi-trade pattern analysis prompt; dispatches via `model_router`
+- `backend/ai/period_diagnosis.py` — period + news event analysis; dispatches via `model_router`
 
-All three diagnosis request bodies accept a `model: str` field (default `"claude-sonnet-4-6"`). The frontend sends `model: loadSettings().ai_model` from both `DiagnosisSidebar` and `TradeAnalysisSidebar`.
+All diagnosis request bodies accept a `model: str` field (default `"claude-sonnet-4-6"`). The frontend sends `model: loadSettings().ai_model`.
 
 **Two-step fetch pattern for trade analysis:** call `/trades/stats` first, render the stats, then call `/trades/analyze` with the stats dict. This avoids sending raw trade data to Claude and produces tighter prompts.
 
@@ -283,8 +255,10 @@ The `RunSummary` type in both `backtest/page.tsx` and `strategies/page.tsx` must
 
 `src/components/BacktestResultPanel.tsx` shows indicator parameters and the trade list with multi-trade selection:
 
-- Entry/exit condition chips, filters, and position sizing rows (reads `strategy.ir_json`)
-- Auto-column grid: 1 col (≤2 conditions), 2 col (3–4), 3 col (5+)
+- Compact horizontal Entry/Exit rows — entry conditions in left column, exit (SL/TP) in right column
+- Auto-column grid within each row: 1 col (≤2 conditions), 2 col (3–4), 3 col (5+)
+- Filters + position sizing rendered as compact chips below the Entry/Exit rows
+- No pair/timeframe/version header — that info lives in the toolbar above the list
 - Trade table has a checkbox column — `checkedTradeIds: Set<string>` state
 - Select-all checkbox uses `ref` callback for `indeterminate` state
 - Row click toggles selection; checked rows get `border-blue-800 bg-blue-900/10` tint
@@ -298,7 +272,7 @@ Do not add Optimize/Refine/View IR navigation buttons to this component — thos
 
 `src/components/TradeAnalysisSidebar.tsx` — props: `backtestRunId`, `tradeIds`, `onClose`
 
-Two-step fetch on mount — both requests include `model: loadSettings().ai_model`:
+Two-step fetch on mount — both requests include `model: loadSettings().ai_model` in the body:
 1. POST `/api/diagnosis/trades/stats` → show selection vs population stats table
 2. POST `/api/diagnosis/trades/analyze` → show AI patterns + verdict
 
@@ -320,7 +294,7 @@ Used by the Co-Pilot Story panel and anywhere SIR needs to be rendered as readab
 
 ### DiagnosisSidebar
 
-`src/components/DiagnosisSidebar.tsx` — single-strategy AI diagnosis panel. Opened via the "Diagnose" button in the Strategies tab toolbar. POSTs to `POST /api/diagnosis/strategy` with `model: loadSettings().ai_model` and renders up to 3 structured fix suggestions with `ir_patch` objects.
+`src/components/DiagnosisSidebar.tsx` — single-strategy AI diagnosis panel. Opened via the "Diagnose" button in the Strategies tab toolbar. POSTs to `POST /api/diagnosis/strategy` and renders up to 3 structured fix suggestions with `ir_patch` objects.
 
 ### Co-Pilot IR panel
 
@@ -334,6 +308,35 @@ The IR inspector in `copilot/page.tsx` shows:
 ### Superchart toolbar
 
 Backtest / Optimize / Refine buttons live in the **top toolbar** (`ml-auto` div), not the bottom-right corner. Use standard `border-blue-700` button style with `disabled:opacity-30 disabled:cursor-not-allowed`.
+
+### Global CSS density overrides
+
+`src/app/globals.css` overrides Tailwind utilities to keep the UI compact. Do not remove these — they are intentional global tightening, not bugs:
+
+```css
+/* Padding compression */
+.px-3, .px-4, .px-6 { padding-left: 0.5rem; padding-right: 0.5rem; }
+.pl-6               { padding-left: 0.5rem; }
+.py-3               { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+
+/* Muted text override */
+.text-slate-500 { color: rgb(148 163 184); }   /* slightly lighter than default */
+
+/* Hide number input spinners */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.no-spinner { -moz-appearance: textfield; }
+```
+
+### Full-viewport page wrapper (`-m-1`)
+
+`<main>` in `layout.tsx` has `p-1`. Pages that need to fill the viewport edge-to-edge cancel it with `-m-1` on their outermost div:
+
+```tsx
+<div className="flex h-full overflow-hidden -m-1">
+```
+
+Currently used by: `strategies/page.tsx`, `copilot/page.tsx`. If global padding ever changes, update all `-m-N` wrappers to match.
 
 ### fetchWithAuth
 
@@ -380,10 +383,11 @@ docker exec forex-ai-platform-timescaledb-1 psql -U forex_user -d forex_db -f /p
 | `strategies` | Strategy records with `ir_json` JSONB |
 | `backtest_runs` | Backtest job metadata AND completed run metrics (sharpe, max_dd, win_rate, trade_count, etc.) |
 | `trades` | Individual trade records (pnl, r_multiple, mae, mfe, entry_time, exit_time, direction) |
-| `optimization_runs` | Optimization session metadata; includes `model VARCHAR(60)` column (migration 016) |
+| `optimization_runs` | Optimization session metadata; `model VARCHAR(60)` column (migration 016) |
 | `optimization_iterations` | Per-iteration results with `strategy_ir` JSONB |
 | `ohlcv_candles` | TimescaleDB hypertable — 6 pairs × 2 timeframes |
 | `ai_usage_log` | Token usage per AI call — model, feature, input/output counts (migration 015) |
+| `news_events` | ForexFactory calendar events — `UNIQUE(event_time, currency, title)` |
 
 **Note:** There is NO separate `backtest_results` table. `backtest_runs` is the single table for both job metadata and result metrics. All diagnosis/analytics queries use `FROM backtest_runs`.
 
@@ -409,6 +413,19 @@ Never add source code bind mounts (`./backend:/app`) to the base `docker-compose
 ### NEXT_PUBLIC_API_URL — local dev
 
 `docker-compose.dev.yml` sets `NEXT_PUBLIC_API_URL: ""` (empty string) on the nextjs service. This forces the browser to use relative URLs routed through nginx — required because Doppler injects `http://localhost:3000` which is only reachable server-side inside the container network, not from the browser.
+
+### Hot reload on Windows (Docker bind mounts)
+
+Next.js with Turbopack (`next dev --turbopack`) ignores `WATCHPACK_POLLING` and `CHOKIDAR_USEPOLLING` on Windows bind-mounted volumes — file changes are never detected. Two fixes applied in combination:
+
+1. `docker-compose.dev.yml` uses `node_modules/.bin/next dev` (webpack, no Turbopack) with env vars:
+   ```yaml
+   WATCHPACK_POLLING: "true"
+   CHOKIDAR_USEPOLLING: "true"
+   ```
+2. `next.config.ts` sets `config.watchOptions = { poll: 1000, aggregateTimeout: 300 }` in the webpack config — fallback for environments where env vars alone are insufficient.
+
+If hot reload stops working, verify both are present. Do not re-add `--turbopack` to the dev command.
 
 ### Docker image tags
 
@@ -443,3 +460,14 @@ Secrets injected at runtime via `doppler run --`. Never hardcode secrets. Config
 - **`LIVE_TRADING_ENABLED`:** `false` (gated flag, Phase 4)
 - **AI models:** Anthropic Claude (`claude-sonnet-4-6`, `claude-opus-4-6`), OpenAI (`gpt-4o`, `gpt-4o-mini`), Google Gemini (`gemini-2.5-pro`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`) — selected in Settings, routing via `ai/model_router.py`
 - **Embeddings:** Voyage AI (`300 RPM / 1M TPM`) — always uses Voyage regardless of AI model selection
+
+---
+
+## Feature specs
+
+Detailed specs for planned features live in `docs/specs/`:
+
+| Spec | File | Phase |
+|---|---|---|
+| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — visual sandbox, AI suggestions, saves as Indicator or Strategy; Superchart overlay integration |
+| ML Signal Engine | `docs/specs/ml-engine.md` | 5 — LightGBM model, single inference path for backtest + live, model registry |
