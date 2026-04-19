@@ -272,8 +272,6 @@ def insert_g_optimize_backtest_run(
     is created for passing configs).  sir_json stores the sampled SIR so the
     strategies panel can display the full IR without a strategy FK.
     """
-    import json as _json
-
     sql = """
         INSERT INTO backtest_runs (
             period_start, period_end, pair, timeframe,

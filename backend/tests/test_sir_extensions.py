@@ -15,7 +15,7 @@ import pandas as pd
 
 from pydantic import ValidationError
 
-from engine.sir import StrategyIR, ExitConditions, TrailingStopConfig
+from engine.sir import StrategyIR
 from engine.parser import SIRParser
 from engine.runner import run_backtest
 

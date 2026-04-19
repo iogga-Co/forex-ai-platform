@@ -396,7 +396,6 @@ def _embed_and_inject_rag(
     Runs synchronously inside the Celery worker via asyncio.run().
     """
     import asyncio
-    from datetime import date as _date
     from ai.voyage_client import embed as voyage_embed
 
     description = _build_rag_description(sir_json, metrics, pair, timeframe)

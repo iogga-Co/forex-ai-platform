@@ -34,8 +34,10 @@ def _cond_label(c: dict) -> str:
     if ind == "BB":
         comp  = c.get("component", "middle")
         sigma = c.get("std_dev", 2.0)
-        if op == "price_above": return f"Price above {comp} BB ({c.get('period')}, {sigma}σ)"
-        if op == "price_below": return f"Price below {comp} BB ({c.get('period')}, {sigma}σ)"
+        if op == "price_above":
+            return f"Price above {comp} BB ({c.get('period')}, {sigma}σ)"
+        if op == "price_below":
+            return f"Price below {comp} BB ({c.get('period')}, {sigma}σ)"
         return f"BB {comp} ({c.get('period')}) {op} {val}"
 
     if ind == "STOCH":
@@ -47,10 +49,14 @@ def _cond_label(c: dict) -> str:
         return f"Stochastic K({c.get('k_smooth')}) {dir_} {val}"
 
     period = c.get("period", "?")
-    if op == "price_above": return f"Price above {ind}({period})"
-    if op == "price_below": return f"Price below {ind}({period})"
-    if op in ("crossed_above", "cross_above"): return f"{ind}({period}) crosses above {val}"
-    if op in ("crossed_below", "cross_below"): return f"{ind}({period}) crosses below {val}"
+    if op == "price_above":
+        return f"Price above {ind}({period})"
+    if op == "price_below":
+        return f"Price below {ind}({period})"
+    if op in ("crossed_above", "cross_above"):
+        return f"{ind}({period}) crosses above {val}"
+    if op in ("crossed_below", "cross_below"):
+        return f"{ind}({period}) crosses below {val}"
     dir_ = "above" if op in (">", ">=") else "below"
     return f"{ind}({period}) {dir_} {val}"
 
