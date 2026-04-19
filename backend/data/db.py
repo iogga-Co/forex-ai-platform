@@ -252,3 +252,55 @@ def fetch_strategy_ir(
         cur.execute(sql, (strategy_id,))
         row = cur.fetchone()
     return row[0] if row else None
+
+
+def insert_g_optimize_backtest_run(
+    conn: psycopg2.extensions.connection,
+    g_optimize_run_id: str,
+    pair: str,
+    timeframe: str,
+    period_start: str,
+    period_end: str,
+    sir_json: dict,
+    metrics: dict,
+    passed_threshold: bool,
+) -> str:
+    """
+    Insert a backtest_run row originating from a G-Optimize discovery run.
+
+    strategy_id is NULL (set later by embed_and_inject_rag when a strategy row
+    is created for passing configs).  sir_json stores the sampled SIR so the
+    strategies panel can display the full IR without a strategy FK.
+    """
+    import json as _json
+
+    sql = """
+        INSERT INTO backtest_runs (
+            period_start, period_end, pair, timeframe,
+            sharpe, sortino, max_dd, win_rate, avg_r, trade_count, total_pnl,
+            source, g_optimize_run_id, passed_threshold, sir_json
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                'g_optimize', %s, %s, %s)
+        RETURNING id
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (
+            period_start,
+            period_end,
+            pair,
+            timeframe,
+            metrics.get("sharpe"),
+            metrics.get("sortino"),
+            metrics.get("max_dd"),
+            metrics.get("win_rate"),
+            metrics.get("avg_r"),
+            metrics.get("trade_count"),
+            metrics.get("total_pnl"),
+            g_optimize_run_id,
+            passed_threshold,
+            psycopg2.extras.Json(sir_json),
+        ))
+        result = cur.fetchone()
+    conn.commit()
+    return str(result[0])

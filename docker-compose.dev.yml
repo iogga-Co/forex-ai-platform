@@ -18,6 +18,10 @@ services:
     volumes:
       - ./backend:/app
 
+  celery-g-optimize:
+    volumes:
+      - ./backend:/app
+
   nextjs:
     command: node_modules/.bin/next dev
     environment:

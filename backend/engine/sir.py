@@ -97,6 +97,10 @@ class IndicatorCondition(BaseModel):
         return self
 
 
+# Structurally identical to IndicatorCondition — alias for semantic clarity in exit context.
+IndicatorExitCondition = IndicatorCondition
+
+
 class StopConfig(BaseModel):
     type: Literal["atr", "fixed_pips", "percent"]
     period: int | None = None        # required when type="atr"
@@ -118,9 +122,21 @@ class StopConfig(BaseModel):
         return self
 
 
+class TrailingStopConfig(BaseModel):
+    enabled: bool = False
+    type: Literal["atr", "fixed_pips"] = "atr"
+    period: int | None = None
+    multiplier: float | None = None   # ATR multiplier (trailing distance)
+    pips: float | None = None         # fixed-pip trailing distance
+    activation_multiplier: float = 1.0  # activate after this × ATR in profit from entry
+
+
 class ExitConditions(BaseModel):
     stop_loss: StopConfig
     take_profit: StopConfig
+    exit_mode: Literal["first", "all", "stops_only"] = "stops_only"
+    indicator_exits: list[IndicatorExitCondition] = []
+    trailing_stop: TrailingStopConfig | None = None
 
 
 class FiltersConfig(BaseModel):

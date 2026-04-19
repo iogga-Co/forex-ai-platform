@@ -76,12 +76,40 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Celery — Background worker for long-running backtests.
+  # Celery — Background worker for long-running backtests + optimization.
   # Shares the same image/code as fastapi. Scale horizontally if needed.
   # ---------------------------------------------------------------------------
   celery:
     build: ./backend
     command: celery -A core.celery_app worker --loglevel=info --concurrency=2 -Q celery,optimization
+    expose: []
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - VOYAGE_API_KEY=${VOYAGE_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - OANDA_API_KEY=${OANDA_API_KEY}
+      - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
+      - OANDA_ENVIRONMENT=${OANDA_ENVIRONMENT}
+      - OPERATOR_PASSWORD=${OPERATOR_PASSWORD}
+      - NUMBA_CACHE_DIR=/tmp/numba_cache
+      - PYTHONPATH=/app
+    depends_on:
+      - timescaledb
+      - redis
+    networks:
+      - internal
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Celery G-Optimize — Dedicated worker for long-running discovery runs.
+  # Kept on a separate queue so interactive backtests are never blocked.
+  # concurrency=2 allows two simultaneous discovery runs.
+  # ---------------------------------------------------------------------------
+  celery-g-optimize:
+    build: ./backend
+    command: celery -A core.celery_app worker --loglevel=info --concurrency=2 -Q g_optimize
     expose: []
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
