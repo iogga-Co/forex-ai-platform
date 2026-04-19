@@ -20,6 +20,8 @@ AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (
 | 1 | Core Engine | ✅ Complete |
 | 2 | AI Intelligence | ✅ Complete |
 | 3 | Analytics Suite | ✅ Complete |
+| 3.5 | Indicator Lab | 🔲 Specced — `docs/specs/indicator-lab.md` |
+| 3.6 | G-Optimize | ✅ Complete — PR #102 |
 | 4 | Live Trading | 🔲 Next |
 | 5 | Production Launch | 🔲 Pending |
 
@@ -34,17 +36,17 @@ forex-ai-platform/
 │   │                     #   analytics, copilot, candles, trading, ws, diagnosis)
 │   ├── engine/           # Backtesting engine (sir.py — SIR schema, parser.py, runner.py,
 │   │                     #   indicators.py, metrics.py, filters.py, sizing.py)
-│   ├── tasks/            # Celery tasks (backtest.py, optimization.py)
+│   ├── tasks/            # Celery tasks (backtest.py, optimization.py, g_optimize.py)
 │   ├── ai/               # model_router.py (provider dispatch), claude/openai/gemini clients,
-│   │                     #   optimization_agent.py, Voyage AI retrieval,
+│   │                     #   optimization_agent.py, g_optimize_agent.py, Voyage AI retrieval,
 │   │                     #   strategy_diagnosis.py, trade_analysis.py, period_diagnosis.py
 │   ├── core/             # Config, DB pool, auth (JWT)
 │   ├── data/             # OHLCV ingest pipeline, quality checks
 │   └── scripts/          # backfill.py — historical data loader; seed_demo.py — demo data seed
 ├── frontend/
 │   └── src/
-│       ├── app/          # Next.js pages: backtest, copilot, dashboard, lab, live, login,
-│       │                 #   news, optimization, settings, strategies, superchart
+│       ├── app/          # Next.js pages: backtest, copilot, dashboard, g-optimize, lab, live,
+│       │                 #   login, news, optimization, settings, strategies, superchart
 │       ├── components/   # BacktestResultPanel, TradeAnalysisSidebar, AuthGuard, etc.
 │       └── lib/          # auth.ts, settings.ts, strategyLabels.ts
 ├── db/migrations/        # SQL migration files (apply manually on existing DB)
@@ -162,6 +164,75 @@ Optimization progress is streamed via Redis pub/sub → SSE. Pattern in `routers
 
 - Backtest tasks → default queue
 - Optimization tasks → `optimization` queue (separate worker)
+- G-Optimize tasks → `g_optimize` queue (dedicated worker, prevents long runs from blocking interactive backtests)
+
+### SIR extensions (Phase 3.6)
+
+`exit_conditions` now supports three new optional fields — all backwards-compatible (existing strategies default to `stops_only` / no trailing):
+
+```json
+{
+  "exit_conditions": {
+    "stop_loss":   { "type": "atr", "period": 14, "multiplier": 1.5 },
+    "take_profit": { "type": "atr", "period": 14, "multiplier": 3.0 },
+    "exit_mode":   "first",
+    "indicator_exits": [
+      { "indicator": "RSI", "period": 14, "operator": "<", "value": 30 }
+    ],
+    "trailing_stop": {
+      "enabled": true, "type": "atr", "period": 14,
+      "multiplier": 1.5, "activation_multiplier": 1.0
+    }
+  }
+}
+```
+
+`exit_mode` values: `"stops_only"` (default) | `"first"` (any condition closes) | `"all"` (conservative fallback = stops_only).  
+Trailing stop uses vectorbt `sl_trail=True` — trailing starts immediately from entry (activation threshold requires custom `adjust_sl_func_nb` in vectorbt 0.26.2; deferred).
+
+### G-Optimize — ConfigSampler + RAG injection
+
+`backend/tasks/g_optimize.py` — `ConfigSampler.sample()` generates random valid SIR dicts from `entry_config`/`exit_config` JSONB blobs stored on `g_optimize_runs`.
+
+**`entry_config` format:**
+```json
+{
+  "max_conditions": 3,
+  "conditions": [
+    { "indicator": "RSI", "period_min": 10, "period_max": 20, "period_step": 5,
+      "operator": ">", "value_min": 40, "value_max": 70 }
+  ]
+}
+```
+
+**`exit_config` format:**
+```json
+{
+  "exit_mode": "stops_only",
+  "indicator_exits": [],
+  "sl": { "type": "atr", "period": 14, "multiplier_min": 1.0, "multiplier_max": 3.0, "multiplier_step": 0.5 },
+  "tp": { "type": "atr", "period": 14, "multiplier_min": 1.5, "multiplier_max": 5.0, "multiplier_step": 0.5 },
+  "trailing": { "enabled": false },
+  "rr_floor": 1.5
+}
+```
+
+Sampler enforces: MACD `fast < slow`, R:R floor (TP ≥ rr_floor × SL), all parameter values within min/max bounds.
+
+`embed_and_inject_rag()` — called for passing strategies: builds human-readable description, calls Voyage AI embed via `asyncio.run()` (sync Celery context), inserts into `strategies` table with `metadata.source="g_optimize"`, stores embedding, sets `backtest_runs.strategy_id`.
+
+`POST /api/g-optimize/strategies/{id}/promote` — manual RAG injection for failed strategies; runs async in the FastAPI event loop (uses `await voyage_embed()` directly, not `asyncio.run()`).
+
+`POST /api/g-optimize/analyze` — Co-Pilot ranking analysis via `ai/g_optimize_agent.py`. Accepts `scope: "checked"|"run"|"all"`. Filters strategies with < 50 trades into `skipped`. Caps at 30 strategies (sorted by Sharpe). Returns `{recommendations, skipped, skipped_reason, strategy_ids}` where `strategy_ids` maps `backtest_run_id → strategy_id` for Co-Pilot navigation.
+
+### G-Optimize — DB schema additions
+
+`backtest_runs` new columns (migration 018, 019):
+- `source VARCHAR(20) DEFAULT 'manual'` — `'manual'|'optimization'|'g_optimize'`
+- `g_optimize_run_id UUID` FK to `g_optimize_runs` (ON DELETE SET NULL)
+- `passed_threshold BOOLEAN` — NULL for manual/optimization rows
+- `sir_json JSONB` — stores sampled SIR for g_optimize rows (strategy_id set only after RAG injection)
+- `strategy_id` now **nullable** — g_optimize backtest runs don't have a strategy row until promoted
 
 ### pgvector queries
 
@@ -467,8 +538,8 @@ Secrets injected at runtime via `doppler run --`. Never hardcode secrets. Config
 
 Detailed specs for planned features live in `docs/specs/`:
 
-| Spec | File | Phase |
-|---|---|---|
-| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — visual sandbox, AI suggestions, saves as Indicator or Strategy; Superchart overlay integration |
-| G-Optimize | `docs/specs/g-optimize.md` | 3.6 — global automated strategy discovery: random param search → backtest → RAG inject → Co-Pilot ranking |
-| ML Signal Engine | `docs/specs/ml-engine.md` | 5 — LightGBM model, single inference path for backtest + live, model registry |
+| Spec | File | Phase | Status |
+|---|---|---|---|
+| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — visual sandbox, AI suggestions, saves as Indicator or Strategy; Superchart overlay integration | 🔲 Specced |
+| G-Optimize | `docs/specs/g-optimize.md` | 3.6 — global automated strategy discovery: random param search → backtest → RAG inject → Co-Pilot ranking | ✅ Complete (PR #102) |
+| ML Signal Engine | `docs/specs/ml-engine.md` | 5 — LightGBM model, single inference path for backtest + live, model registry | 🔲 Specced |
