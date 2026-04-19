@@ -411,6 +411,14 @@ All three limits stored on the strategy record / SIR extension. Defaults:
 - `db/migrations/0xx_ml_models.sql` — model registry table
 - Validate: train on EURUSD 1H, check val metrics, inspect feature importance
 
+**Before training:** run a feature validation pass on the computed dataset:
+- Distribution check — flag features with near-zero variance or >20% NaN rows
+- Correlation matrix — drop features with >0.95 pairwise correlation (redundant)
+- Class separation — plot feature distributions by label (BUY / SELL / HOLD) to confirm at least some features show visible separation
+- SHAP importance — after a first LightGBM fit, inspect top-10 features; if liquidity proxies (`sweep_high`, `liq_high_cluster`) don't appear in the top half, revisit the labeling window
+
+This pass is cheap and prevents wasting training runs on a broken feature set.
+
 ### Step 2 — Inference layer
 - `backend/ml/inference.py` — `MLEngine` class
 - `backend/core/app_state.py` — load active models at FastAPI startup
