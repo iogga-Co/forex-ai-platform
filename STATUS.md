@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-18 (superchart OSC params, optimization batch delete, story panel redesign, demo seed, Indicator Lab + ML Engine specs — PRs #95–#99)
+**Last updated:** 2026-04-19 (G-Optimize discovery engine Phase 3.6 — PR #102)
 
 ---
 
@@ -12,19 +12,21 @@
 | **1** | Core Engine | ✅ Complete | ✅ 58 tests pass, CI green, PR #7 merged, staging live |
 | **2** | AI Intelligence | ✅ Complete | ✅ Strategy created → backtest runs → results stored. AI summary live |
 | **3** | Analytics Suite | ✅ Complete | ✅ 283 trades stored, equity curve 283 pts, all /api/analytics endpoints live |
+| **3.5** | Indicator Lab | 🔲 Specced | Spec in `docs/specs/indicator-lab.md` |
+| **3.6** | G-Optimize | ✅ Complete | ✅ 148 tests pass, PR #102 merged, staging live 2026-04-19 |
 | **4** | Live Trading | 🔲 Next | Pending |
 | **5** | Production Launch | 🔲 Pending | Pending |
 
 ---
 
-## Current Staging State (2026-04-18)
+## Current Staging State (2026-04-19)
 
 | Item | Value |
 |---|---|
 | URL | https://trading.iogga-co.com |
 | Health | ✅ 200 OK |
-| Last deployed PR | #99 (superchart OSC params, optimization batch delete, story panel redesign, demo seed) |
-| Services | All 8 up (nginx, fastapi, celery, nextjs, timescaledb, redis, prometheus, grafana) |
+| Last deployed PR | #102 (G-Optimize discovery engine, Phase 3.6) |
+| Services | All 9 up (nginx, fastapi, celery, **celery-g-optimize**, nextjs, timescaledb, redis, prometheus, grafana) |
 | OANDA mode | `practice` (demo account, account 001-001-21125823-001) |
 | `LIVE_TRADING_ENABLED` | `false` |
 | Anthropic API | ✅ Key active — credits available |
@@ -716,14 +718,15 @@ Next.js with Turbopack (`next dev --turbopack`) ignores `WATCHPACK_POLLING` and 
 
 ---
 
-## Indicator Lab + ML Engine Specs (2026-04-18)
+## Feature Specs (2026-04-18)
 
-Detailed feature specs created in `docs/specs/`:
+Detailed specs in `docs/specs/`:
 
-| Spec | File | Phase |
-|---|---|---|
-| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — next after Phase 4 Live Trading |
-| ML Signal Engine | `docs/specs/ml-engine.md` | 5 — after Live Trading proven |
+| Spec | File | Phase | Status |
+|---|---|---|---|
+| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 | 🔲 Specced |
+| G-Optimize | `docs/specs/g-optimize.md` | 3.6 | ✅ Complete — PR #102 |
+| ML Signal Engine | `docs/specs/ml-engine.md` | 5 | 🔲 Specced |
 
 ### Indicator Lab summary
 
@@ -735,10 +738,56 @@ LightGBM model trained on ~25 tabular indicator features. Single `MLEngine.predi
 
 ---
 
+## G-Optimize — Phase 3.6 ✅
+
+**Gate passed 2026-04-19.** PR #102 merged. 148 tests pass. Staging live.
+
+### Deliverables (12 PRs)
+
+| PR | What |
+|---|---|
+| 1 | SIR extensions: `exit_mode` (first/all/stops_only), `indicator_exits`, trailing stop via `sl_trail=True` (vectorbt 0.26.2) |
+| 2 | DB migrations 017–019: `g_optimize_runs` table, `backtest_runs` provenance columns (`source`, `g_optimize_run_id`, `passed_threshold`, `sir_json`), nullable `strategy_id` |
+| 3 | Backend API skeleton: CRUD endpoints + stubs for `/api/g-optimize/*` |
+| 4 | Frontend skeleton: G-Optimize sidebar entry, page shell (3-section layout), runs list with SSE |
+| 5 | Run config form: 8-indicator entry/exit builder, stop ranges, trailing stop, threshold inputs |
+| 6 | `ConfigSampler` + Celery orchestrator: random SIR generation, R:R floor enforcement, OHLCV pre-fetch, progress publishing |
+| 7 | SSE progress stream + dashboard widget: `g_optimize:progress:{id}` Redis channel → browser EventSource; 10s poll widget on Dashboard |
+| 8 | Strategies panel + RAG injection: paginated passed/failed tabs, near-miss yellow border, expand detail, Voyage AI embed → pgvector |
+| 9 | Manual Promote to RAG + delete confirmation modal |
+| 10 | Co-Pilot ranking backend: `ai/g_optimize_agent.py` — prompt builder, JSON parser, `analyze_and_rank()` |
+| 11 | Co-Pilot analysis panel: 3-scope selector, ranked recommendations with Open in Co-Pilot links |
+| 12 | Polish + CI: sampler property tests (R:R, bounds, MACD invariant), API endpoint tests, ruff fixes, dev compose |
+
+### Architecture
+
+- **Celery queue**: `g_optimize` — dedicated worker (`celery-g-optimize` service) keeps discovery runs from blocking interactive backtests
+- **ConfigSampler**: samples random valid SIRs from `entry_config`/`exit_config` JSONB specs; enforces MACD `fast < slow`, R:R floor
+- **RAG injection**: passing strategies saved to `strategies` table with `metadata.source="g_optimize"`, Voyage AI 1024-dim embed stored in pgvector
+- **Promote endpoint**: async embed in FastAPI event loop (not Celery) — fast single-embed path for manual promotion
+- **Analyze endpoint**: 3 scopes (`checked`/`run`/`all`), 50-trade minimum, 30-strategy cap, model_router dispatch
+
+### Key lessons
+
+- vectorbt 0.26.2 trailing stop = `sl_trail=True` flag on `sl_stop` param — not a separate `tsl_stop` parameter
+- `strategy_id NOT NULL` constraint on `backtest_runs` had to be relaxed (migration 019) — g_optimize runs have no strategy row until RAG-injected
+- Async Voyage embed (`asyncio.run()`) works in sync Celery worker; FastAPI endpoint uses direct `await` — two different patterns for the same operation
+- Ruff E701 triggered by single-line `if x: return y` — always split to two lines
+- Local main diverges from origin/main after squash-merges — cherry-pick the feature commit onto a clean branch from `origin/main`, then PR
+
+### Test count
+
+**148 passed** (125 previous + 23 new):
+- `test_sir_extensions.py` (15): exit mode, trailing stop, runner integration, golden backwards compat
+- `test_g_optimize_sampler.py` (13): R:R floor, parameter bounds, exit modes, MACD invariant, Pydantic validation
+- `test_g_optimize_api.py` (10): CRUD, strategies tab, promote, analyze endpoints
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Phase 4 — Live Trading | Next | All 6 pairs loaded (Apr 2021–Apr 2026). All Phase 3 features + ForEx News shipped. Ready to begin. |
+| Phase 4 — Live Trading | **Next** | All 6 pairs loaded (Apr 2021–Apr 2026). All Phase 3 + G-Optimize shipped. Ready to begin. |
 | Indicator Lab | After Phase 4 | Spec complete — `docs/specs/indicator-lab.md` |
 | ML Signal Engine | Phase 5 | Spec complete — `docs/specs/ml-engine.md` |
