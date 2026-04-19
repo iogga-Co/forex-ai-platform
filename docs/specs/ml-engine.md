@@ -77,8 +77,8 @@ Reasons over PyTorch/deep learning for forex tabular data:
 - Inference is microseconds — no latency concern
 - Production-proven in quant finance
 
-**Secondary (future):** LSTM or Transformer on raw OHLCV sequences — only if LightGBM proves
-insufficient. Do not build this first.
+**Secondary (v2):** BiLSTM / Transformer on OHLCV sequences — see [v2: SSLT Architecture](#v2-sslt-architecture) below.
+Build this only after LightGBM baseline is proven in production.
 
 ---
 
@@ -88,6 +88,7 @@ Each row is one closed candle. Features are computed by `engine/indicators.py` (
 
 ### Price-derived
 - `close`, `high`, `low`, `open`
+- `returns` = `close.pct_change()`
 - `body_size` = `abs(close - open) / open`
 - `upper_wick` = `(high - max(open, close)) / open`
 - `lower_wick` = `(min(open, close) - low) / open`
@@ -117,9 +118,54 @@ Each row is one closed candle. Features are computed by `engine/indicators.py` (
 - `is_london_session` (bool)
 - `is_ny_session` (bool)
 
+### Market structure
+- `higher_high` = bool — `high > high[−1]`
+- `lower_low`   = bool — `low < low[−1]`
+- `expansion`   = bool — `range > range.rolling(20).mean()` (current bar is above-average size)
+
+### Structure + liquidity proxies
+- `swing_high_dist` = distance from `close` to nearest recent swing high (normalised by ATR)
+- `swing_low_dist` = distance from `close` to nearest recent swing low (normalised by ATR)
+- `equal_highs` = bool — 2+ recent highs within 0.5 × ATR (potential stop cluster above)
+- `equal_lows` = bool — 2+ recent lows within 0.5 × ATR (potential stop cluster below)
+- `liq_high_cluster` = `high.rolling(10).apply(lambda x: (abs(x - x.mean()) < 0.0005).sum())` — count of highs clustered near the rolling mean; high value = stacked stops above
+- `liq_low_cluster`  = same applied to `low` — stacked stops below
+- `wick_spike` = bool — either wick > 2 × body size
+- `sweep_high` = bool — `high > high[−1]` AND `close < high[−1]` (pierced prior high, closed back inside — stop-run)
+- `sweep_low`  = bool — `low < low[−1]`  AND `close > low[−1]`  (pierced prior low,  closed back inside — stop-run)
+- `sweep_strength` = `(high - close) / range` — how aggressively price was rejected at the high (continuous version of `sweep_high`)
+- `range_compression` = rolling ATR[5] / ATR[20] — low value = coiling, high = expansion
+
 ### Lookahead label (training only, never used in inference)
-- `label`: `BUY` if `close[+5] > close[0] + atr14 * 1.0`, `SELL` if below, else `HOLD`
-- The `+5` horizon and `atr14` multiplier are tunable hyperparameters
+
+Outcome-based labeling — measures what actually happened over the next N candles, not a simple
+price-vs-price comparison. This better reflects trade viability than a fixed-horizon close delta.
+
+```python
+FORWARD_WINDOW = 20      # candles to look ahead (tunable)
+TP             = 0.0020  # take-profit as raw price delta (pair-agnostic; ~20 pips on EURUSD 1H)
+SL             = 0.0010  # stop-loss  as raw price delta (~10 pips)
+
+# For each candle i:
+future   = df.iloc[i+1 : i+FORWARD_WINDOW]
+max_up   = future["high"].max()  - close[i]
+max_down = close[i] - future["low"].min()
+
+if   max_up   >= TP and max_down < SL:  label = BUY
+elif max_down >= TP and max_up   < SL:  label = SELL
+else:                                    label = HOLD
+
+# Secondary label: move quality (used for sample weighting)
+quality[i] = max(max_up, max_down)
+```
+
+`quality` is a continuous value representing how strong the winning side was. It is stored
+alongside `label` in the training dataset and used to weight the loss function during training
+so the model learns to care more about strong moves than marginal ones (see Training Pipeline).
+
+Using raw price delta (not pip-normalised) keeps the formula pair-agnostic; scale `TP`/`SL` per
+pair if needed. `FORWARD_WINDOW`, `TP`, and `SL` are CLI arguments to `trainer.py`; defaults
+above suit 1H candles. For 1m, reduce `FORWARD_WINDOW` and `TP`/`SL` proportionally.
 
 ---
 
@@ -171,15 +217,23 @@ python backend/ml/trainer.py \
 Steps:
 1. Fetch OHLCV from TimescaleDB for the full window + 300-bar warmup
 2. Compute all features via `engine/indicators.py`
-3. Generate labels with configurable horizon + ATR multiplier
+3. Generate labels with configurable horizon + ATR multiplier; compute `quality` column
 4. Train/val split (NO random split — always time-based to prevent leakage)
-5. Train LightGBM with early stopping on validation loss
+5. Train LightGBM with early stopping on validation loss, **weighted by `quality`**:
+   ```python
+   model.fit(X_train, y_train, sample_weight=quality_train, ...)
+   ```
 6. Evaluate: accuracy, precision, recall per class, Sharpe ratio on val set using signal-only trades
 7. Save model artifact + insert row into `ml_models` (is_active=False)
 8. Print evaluation report
 
 **Critical:** The train/val split is ALWAYS chronological. Never shuffle. Shuffled splits inflate
 accuracy by ~15–20% on financial time series due to autocorrelation leakage.
+
+**Sample weighting:** Weighting by `quality` (move magnitude) focuses the model on setups where
+the market made a decisive move. Marginal TP/SL races — where max_up ≈ max_down — contribute
+less to the loss. This tends to improve real-money performance more than accuracy metrics suggest
+because those marginal trades are the first to fail in live conditions (spread + slippage eats them).
 
 ### Hyperparameters (starting point)
 
@@ -357,6 +411,14 @@ All three limits stored on the strategy record / SIR extension. Defaults:
 - `db/migrations/0xx_ml_models.sql` — model registry table
 - Validate: train on EURUSD 1H, check val metrics, inspect feature importance
 
+**Before training:** run a feature validation pass on the computed dataset:
+- Distribution check — flag features with near-zero variance or >20% NaN rows
+- Correlation matrix — drop features with >0.95 pairwise correlation (redundant)
+- Class separation — plot feature distributions by label (BUY / SELL / HOLD) to confirm at least some features show visible separation
+- SHAP importance — after a first LightGBM fit, inspect top-10 features; if liquidity proxies (`sweep_high`, `liq_high_cluster`) don't appear in the top half, revisit the labeling window
+
+This pass is cheap and prevents wasting training runs on a broken feature set.
+
 ### Step 2 — Inference layer
 - `backend/ml/inference.py` — `MLEngine` class
 - `backend/core/app_state.py` — load active models at FastAPI startup
@@ -405,10 +467,169 @@ Estimated PRs: 8–10
 
 ---
 
+---
+
+## v2: SSLT Architecture
+
+**Status:** Planned after LightGBM v1 is proven in production  
+**Model name:** State-Space Liquidity Transformer (SSLT)
+
+### Philosophy
+
+Forex operates in state transitions: Accumulation → Manipulation → Expansion → Distribution.
+A sequence model can learn these transitions; a single-row LightGBM cannot. SSLT is the natural
+upgrade once tabular signals hit their ceiling.
+
+### Input
+
+Sequence of the last 50–200 closed candles. Each timestep carries the same feature set as v1
+(all columns above) — no new features needed at this layer.
+
+```python
+# shape: (batch, sequence_length=100, features=25)
+```
+
+### Architecture
+
+```
+Input Sequence (candles × features)
+        ↓
+Feature Encoder — Dense(64) → ReLU → Dense(64)
+        ↓
+State Encoder — BiLSTM(hidden=128, layers=2)   # or Transformer Encoder
+        ↓
+Latent Market State — 128-dim vector
+        ↓
+Multi-head outputs:
+   ├─ Head 1: Regime          — Dense → Softmax(4)  [RANGE, TREND, EXPANSION, REVERSAL]
+   ├─ Head 2: Liquidity Event — Dense → Sigmoid      [stop-hunt / sweep probability]
+   ├─ Head 3: Direction       — Dense → Softmax(3)  [BUY, SELL, HOLD] + scalar move_pips
+   └─ Head 4: Confidence      — Dense → Sigmoid      [signal reliability]
+```
+
+Start with BiLSTM; upgrade to Transformer Encoder only if BiLSTM underfits.
+
+**Attention layer** — add `nn.MultiheadAttention` after the BiLSTM output so the model can
+focus on key candles (e.g. sweep bars, compression breakouts) rather than treating all 100
+timesteps equally:
+
+```python
+self.attention = nn.MultiheadAttention(embed_dim=128, num_heads=4, batch_first=True)
+# usage: attn_out, _ = self.attention(lstm_out, lstm_out, lstm_out)
+```
+
+**Feature gating** — a learned gate applied to the feature encoder output lets the model
+suppress irrelevant features dynamically per timestep:
+
+```python
+self.gate = nn.Linear(input_size, input_size)
+# usage: x = x * torch.sigmoid(self.gate(x))
+```
+
+This is particularly useful because regime-relevant features change: volatility features matter
+during compression; structure features matter at potential sweep points.
+
+### MLSignal extension for SSLT models
+
+LightGBM models set the new fields to `None` — all existing consumers are unaffected.
+
+```python
+@dataclass
+class MLSignal:
+    signal: Literal["BUY", "SELL", "HOLD"]
+    confidence: float
+    sl_pips: float | None
+    tp_pips: float | None
+    feature_importance: dict
+    model_version: str
+    # v2 fields — None for LightGBM models
+    regime: Literal["RANGE", "TREND", "EXPANSION", "REVERSAL"] | None
+    liquidity_sweep_prob: float | None
+    expected_move_pips: float | None
+```
+
+### Decision engine
+
+Raw model outputs are filtered through regime-conditional logic before a trade is issued.
+Lives in `live/engine.py` and the backtester runner — not inside the model itself.
+
+```python
+if regime == "RANGE" and confidence > 0.70:
+    trade = mean_reversion_signal(direction)
+
+elif regime == "TREND" and liquidity_sweep_prob > 0.60 and direction == "BUY":
+    trade = continuation_signal(direction)
+
+elif regime == "EXPANSION":
+    trade = breakout_signal(direction)
+
+else:
+    trade = None  # no trade
+```
+
+### Training
+
+Same outcome-based labeling as v1. Additional label columns for training the regime and
+liquidity heads are derived from heuristics applied to the historical feature sequences:
+
+- **Regime label** — derived from rolling ATR percentile + EMA slope + range compression
+- **Liquidity label** — `equal_highs` / `equal_lows` followed by `wick_spike` within 3 candles
+
+### Loss function
+
+```python
+total_loss = (
+    direction_loss               # cross-entropy, weight 1.0
+  + 0.5 * regime_loss            # cross-entropy
+  + 0.5 * liquidity_loss         # binary cross-entropy
+  + 0.2 * confidence_loss        # MSE vs realised win rate in batch
+)
+```
+
+### Inference interface
+
+```python
+class LSTMEngine:
+    def predict(self, model_id: str, feature_sequence: np.ndarray) -> MLSignal:
+        ...
+```
+
+Both `MLEngine` (LightGBM) and `LSTMEngine` return the same `MLSignal` type. The SIR
+`ml_signal` entry condition and all downstream consumers require no changes.
+
+### Multi-timeframe context (v2 enhancement)
+
+Forex is fractal — a 1H signal without M15 and H4 context is blind to the dominant structure.
+Adding higher-TF features to each row is high-value but requires aligning candle timestamps
+across timeframes:
+
+```python
+# Example: join H4 and D1 features onto the 1H row by timestamp alignment
+df["ema200_h4"]  = resample_ema(ohlcv_1h, span=200, target_tf="4H")
+df["rsi14_h4"]   = resample_rsi(ohlcv_1h, period=14, target_tf="4H")
+df["adx14_d1"]   = resample_adx(ohlcv_1h, period=14, target_tf="1D")
+```
+
+Infrastructure requirement: `features.py` must accept multi-TF OHLCV frames and produce a
+merged row. The `trainer.py` CLI gains `--context-timeframes H4,1D`. Not needed for v1 baseline.
+
+### Build order (v2)
+
+1. Validate that LightGBM v1 is live and producing real edge
+2. Add regime + liquidity heuristic labelers to `ml/trainer.py`
+3. Implement `backend/ml/lstm_trainer.py` — PyTorch, same CLI interface as LightGBM trainer
+4. Implement `backend/ml/lstm_inference.py` — `LSTMEngine` class
+5. Add `"lstm"` to `ml_models.algorithm` column; activate via same `/api/ml/models/{id}/activate`
+6. Implement decision engine layer in `live/engine.py` and `engine/runner.py`
+7. Run shadow mode comparison: SSLT signals vs LightGBM signals on same candles
+
+---
+
 ## Out of scope (v1)
 
-- Deep learning models (LSTM, Transformer) — add after LightGBM baseline is proven
+- Deep learning models (LSTM, Transformer) — scoped in v2 SSLT section above; not built until LightGBM v1 is proven
 - Automated retraining on schedule — manual retrain + activate for now
 - Multi-pair ensemble models — one model per (pair, timeframe) only
+- Multi-timeframe context features — scoped in v2 SSLT section above
 - Walk-forward optimisation — validate manually; automate in v2
 - Real-time feature drift monitoring — log predictions, analyse offline
