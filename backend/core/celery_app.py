@@ -10,7 +10,7 @@ celery_app = Celery(
     "forex_ai",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["tasks.backtest", "tasks.optimization"],
+    include=["tasks.backtest", "tasks.optimization", "tasks.g_optimize"],
 )
 
 celery_app.conf.update(
@@ -23,6 +23,11 @@ celery_app.conf.update(
     task_soft_time_limit=900,   # 15 min soft limit — task gets a warning
     task_time_limit=1200,       # 20 min hard limit — task is killed
     worker_prefetch_multiplier=1,  # One task at a time per worker (CPU-bound)
+    task_routes={
+        "tasks.backtest.*":    {"queue": "celery"},
+        "tasks.optimization.*": {"queue": "optimization"},
+        "tasks.g_optimize.*":  {"queue": "g_optimize"},
+    },
 )
 
 

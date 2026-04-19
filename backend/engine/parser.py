@@ -67,6 +67,38 @@ class SIRParser:
         combined.name = "entry_signals"
         return combined.fillna(False)
 
+    def exit_signals(self) -> pd.Series:
+        """
+        Boolean Series: True on bars where ANY indicator exit condition fires.
+        Returns all-False if no indicator_exits are defined.
+        """
+        exits = self._sir.exit_conditions.indicator_exits
+        if not exits:
+            return pd.Series(False, index=self._df.index, dtype=bool)
+        condition_series = [self._evaluate_condition(cond) for cond in exits]
+        combined = reduce(lambda a, b: a | b, condition_series)
+        combined.name = "exit_signals"
+        return combined.fillna(False)
+
+    def trailing_stop_fraction(self) -> pd.Series | None:
+        """
+        Per-bar trailing stop fraction (distance from peak) or None if disabled.
+        """
+        ts = self._sir.exit_conditions.trailing_stop
+        if ts is None or not ts.enabled:
+            return None
+        if ts.type == "atr":
+            atr_vals = self._get_indicator("ATR", period=ts.period or 14)
+            mult = ts.multiplier or 1.5
+            frac = (atr_vals * mult) / self._df["close"].replace(0, np.nan)
+            return frac.fillna(0.01)
+        if ts.type == "fixed_pips":
+            pip_size = 0.01 if "JPY" in self._symbol else 0.0001
+            pips = ts.pips or 20.0
+            frac = (pips * pip_size) / self._df["close"].replace(0, np.nan)
+            return frac.fillna(0.01)
+        raise ValueError(f"Unknown trailing stop type '{ts.type}'")
+
     def sl_fractions(self) -> pd.Series:
         """
         Stop-loss as a fraction of close price per bar.

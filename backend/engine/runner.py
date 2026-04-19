@@ -120,14 +120,24 @@ def run_backtest(
 
     _progress(20)
 
+    # --- Exit mode: build exits series from indicator exits ---
+    exit_mode = sir.exit_conditions.exit_mode
+    if exit_mode == "first":
+        # Any indicator exit OR SL/TP closes the trade
+        exits_series = parser.exit_signals()
+    else:
+        # "stops_only": indicator exits ignored (current default behaviour)
+        # "all": requires indicator exit AND SL/TP simultaneously — complex;
+        #        conservative fallback is stops_only until custom post-run logic added
+        exits_series = pd.Series(False, index=df.index)
+
+    _progress(25)
+
     # --- Apply one-bar shift: execute at next open (no look-ahead bias) ---
     # Execution price: next bar's open.  Last bar has no "next open" → use close.
     next_open = df["open"].shift(-1).fillna(df["close"])
 
     # Filter mask is aligned to the OHLCV index (execution bar = same index).
-    # entries on bar N with next_open[N] = open[N+1]: filter checks bar N.
-    # Since signals are "fire at N, fill at N+1", checking the signal bar's
-    # session is the correct semantic (don't enter if the signal bar is excluded).
     entries = raw_entries & filter_mask
 
     _progress(30)
@@ -142,24 +152,36 @@ def run_backtest(
         int(entries.sum()),
     )
 
+    # Assemble portfolio kwargs; trailing stop params added only when enabled
+    portfolio_kwargs: dict = dict(
+        close=df["close"],
+        open=df["open"],
+        high=df["high"],
+        low=df["low"],
+        entries=entries,
+        exits=exits_series,
+        price=next_open,         # execute at next bar's open
+        size=sizes,
+        size_type="amount",      # sizes are in units of the base currency
+        sl_stop=sl_fracs,        # fraction of entry price
+        tp_stop=tp_fracs,        # fraction of entry price
+        fees=fees,
+        init_cash=initial_capital,
+        freq=freq,
+        upon_opposite_entry="ignore",  # no reversals in Phase 1 (long-only)
+    )
+
+    # Trailing stop: vectorbt 0.26.2 uses sl_trail=True to make sl_stop trailing.
+    # When enabled, the trailing stop fraction replaces the fixed sl_stop.
+    # Note: per-bar activation threshold (activation_multiplier) is not natively
+    # supported in this vectorbt version — trailing starts from entry immediately.
+    tsl_fracs = parser.trailing_stop_fraction()
+    if tsl_fracs is not None:
+        portfolio_kwargs["sl_stop"] = tsl_fracs   # trailing distance replaces fixed SL
+        portfolio_kwargs["sl_trail"] = True
+
     try:
-        portfolio = vbt.Portfolio.from_signals(
-            close=df["close"],
-            open=df["open"],
-            high=df["high"],
-            low=df["low"],
-            entries=entries,
-            exits=pd.Series(False, index=df.index),  # SL/TP handles all exits
-            price=next_open,         # execute at next bar's open
-            size=sizes,
-            size_type="amount",      # sizes are in units of the base currency
-            sl_stop=sl_fracs,        # fraction of entry price
-            tp_stop=tp_fracs,        # fraction of entry price
-            fees=fees,
-            init_cash=initial_capital,
-            freq=freq,
-            upon_opposite_entry="ignore",  # no reversals in Phase 1 (long-only)
-        )
+        portfolio = vbt.Portfolio.from_signals(**portfolio_kwargs)
     except Exception as exc:
         logger.error("vectorbt portfolio run failed: %s", exc)
         raise
