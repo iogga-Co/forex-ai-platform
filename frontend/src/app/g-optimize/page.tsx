@@ -119,8 +119,8 @@ function GOptimizeInner() {
 
         {/* ── TOP: Run Config panel ─────────────────────────────────── */}
         {showConfig && (
-          <div className="shrink-0 border-b border-zinc-800 bg-zinc-900/50">
-            <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
+          <div className="shrink-0 border-b border-zinc-800 bg-zinc-900/50 max-h-[70vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 shrink-0">
               <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wide">
                 New G-Optimize Run
               </span>
