@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-19 (G-Optimize discovery engine Phase 3.6 — PR #102)
+**Last updated:** 2026-04-20 (Indicator Lab PR1, Phase 4 PR1, timeframe resampling — PRs #104–#108)
 
 ---
 
@@ -12,9 +12,9 @@
 | **1** | Core Engine | ✅ Complete | ✅ 58 tests pass, CI green, PR #7 merged, staging live |
 | **2** | AI Intelligence | ✅ Complete | ✅ Strategy created → backtest runs → results stored. AI summary live |
 | **3** | Analytics Suite | ✅ Complete | ✅ 283 trades stored, equity curve 283 pts, all /api/analytics endpoints live |
-| **3.5** | Indicator Lab | 🔲 Specced | Spec in `docs/specs/indicator-lab.md` |
+| **3.5** | Indicator Lab | 🚧 In progress | PR #108 merged (backend); frontend PRs 2–5 next |
 | **3.6** | G-Optimize | ✅ Complete | ✅ 148 tests pass, PR #102 merged, staging live 2026-04-19 |
-| **4** | Live Trading | 🔲 Next | Pending |
+| **4** | Live Trading | 🚧 In progress | PR #106 open (feed + price ticker) |
 | **5** | Production Launch | 🔲 Pending | Pending |
 
 ---
@@ -784,10 +784,48 @@ LightGBM model trained on ~25 tabular indicator features. Single `MLEngine.predi
 
 ---
 
+## Session 2026-04-20 — UX Fixes, Timeframes, Phase 4 + Indicator Lab start
+
+| PR | Change |
+|---|---|
+| #104 | fix: G-Optimize form UX — remove step constraints on n_configs/min_trades, show all hidden bounds, scrollable config panel; CI deploy adds migration loop + celery-g-optimize to recreate step ✅ merged |
+| #105 | fix: Superchart state persists across navigation (localStorage `superchart_state`); Reset button; NumInput `0→05` bug fixed ✅ merged |
+| #106 | feat: Phase 4 PR1 — OANDA feed (`live/feed.py`), OANDA client (`live/oanda.py`), `/ws/prices/{pair}` WebSocket relay, live page price ticker strip, migration 020 (sl_price/tp_price/r_multiple/shadow_mode on live_orders) 🔲 **open** |
+| #107 | feat: on-the-fly timeframe resampling — 5m/15m/30m/4H/1D derived from stored 1m via pandas; analytics overlay uses actual backtest TF; G-Optimize gets timeframe dropdown ✅ merged |
+| #108 | feat: Indicator Lab PR1 — migration 021 (saved_indicators), `routers/lab.py` (compute + signals + CRUD), sidebar nav entry ✅ merged |
+
+### G-Optimize fixes (PR #104)
+- `n_configs` and `threshold_min_trades` inputs: `step=1` (previously `step=500`/`step=5` caused browser to reject valid values like 1000 and 30)
+- All hidden constraints now shown inline: ATR period `(1–200)`, mult step `(min 0.01)`, R:R floor `(min 0.1)`
+- Config panel: `max-h-[70vh]` + `overflow-hidden` — scrolls instead of overflowing
+- CI deploy: migration loop runs all `.sql` files idempotently on every deploy; `celery-g-optimize` added to force-recreate step
+
+### Root cause: HTTP 500 on Start G-Optimize
+Migrations 017–019 were never applied to staging DB (`g_optimize_runs` table missing). Applied manually. CI deploy now runs migrations automatically on every deploy.
+
+### Timeframe resampling (PR #107)
+`_STORED_TF = {"1m", "1H"}`. All other timeframes fetch 1m data and resample:
+```python
+df.resample(rule, label="left", closed="left").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"})
+```
+Warmup for indicator overlays scales by `minutes_per_bar × 300 bars`.
+
+### Indicator Lab PR1 (PR #108)
+- `saved_indicators` table: `id UUID`, `user_id TEXT`, `name`, `status` (draft/complete), `indicator_config JSONB`, `signal_conditions JSONB`
+- `POST /api/lab/indicators` — stateless compute, all 8 indicators, all 7 timeframes
+- `POST /api/lab/signals` — entry signal timestamps from conditions
+- Full CRUD `/api/lab/indicators/saved`
+- `DELETE` 204 requires `response_model=None` explicitly (FastAPI assertion)
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Phase 4 — Live Trading | **Next** | All 6 pairs loaded (Apr 2021–Apr 2026). All Phase 3 + G-Optimize shipped. Ready to begin. |
-| Indicator Lab | After Phase 4 | Spec complete — `docs/specs/indicator-lab.md` |
+| Phase 4 PR1 | **Merge pending** | PR #106 open — OANDA feed, price WebSocket, live page ticker |
+| Phase 4 PR2 | **Next** | Bar builder + signal engine (shadow mode) + signal log frontend |
+| Phase 4 PR3 | After PR2 | Executor + real trading.py endpoints + positions table |
+| Indicator Lab PR2 | Parallel | Frontend: Builder panel + Chart + live recompute + signal markers |
+| Indicator Lab PR3–5 | After PR2 | CRUD UI, AI analysis, Superchart integration |
 | ML Signal Engine | Phase 5 | Spec complete — `docs/specs/ml-engine.md` |
