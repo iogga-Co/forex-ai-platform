@@ -112,7 +112,7 @@ interface SseEvent {
 // ---------------------------------------------------------------------------
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 const PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"];
-const TIMEFRAMES = ["1m", "1H"];
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"];
 
 // ---------------------------------------------------------------------------
 // Helpers

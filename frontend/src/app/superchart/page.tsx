@@ -116,7 +116,7 @@ function scClear() {
   try { localStorage.removeItem(SC_STORAGE_KEY); } catch {}
 }
 const PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"];
-const TIMEFRAMES = ["1m", "1H"];
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"];
 
 const CHART_THEME = {
   background: "#09090b",
