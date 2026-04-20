@@ -11,7 +11,7 @@ from core import db as core_db
 from core.config import settings
 from core.redis_bridge import subscribe_and_forward
 from core.websocket import manager
-from routers import analytics, auth, backtest, candles, copilot, diagnosis, g_optimize, health, news, optimization, strategy, trading, ws
+from routers import analytics, auth, backtest, candles, copilot, diagnosis, g_optimize, health, lab, news, optimization, strategy, trading, ws
 from routers import settings as settings_router
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,7 @@ app.include_router(copilot.router)
 app.include_router(trading.router)
 app.include_router(optimization.router)
 app.include_router(g_optimize.router)
+app.include_router(lab.router)
 app.include_router(diagnosis.router)
 app.include_router(news.router)
 app.include_router(settings_router.router)

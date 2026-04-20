@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: "/optimization", label: "Optimize"     },
   { href: "/news",         label: "ForEx News"   },
   { href: "/g-optimize",  label: "G-Optimize"   },
+  { href: "/lab",          label: "Indicator Lab"},
   { href: "/live",         label: "Live Trading" },
 ] as const;
 
