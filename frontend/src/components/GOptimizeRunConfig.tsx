@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { fetchWithAuth } from "@/lib/auth";
 import type { GOptimizeRun } from "@/lib/gOptimizeTypes";
 
@@ -159,11 +159,39 @@ function NumInput({ value, onChange, min, max, step, w = "w-12" }: {
   value: number; onChange: (v: number) => void;
   min?: number; max?: number; step?: number; w?: string;
 }) {
+  const [raw, setRaw] = useState(String(value));
+  const prevProp = useRef(value);
+
+  // Sync external changes (e.g. form reset) without clobbering mid-edit
+  useEffect(() => {
+    if (value !== prevProp.current) {
+      prevProp.current = value;
+      setRaw(String(value));
+    }
+  }, [value]);
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setRaw(e.target.value);
+    const n = parseFloat(e.target.value);
+    if (!isNaN(n)) onChange(n);
+  }
+
+  function handleBlur() {
+    const n = parseFloat(raw);
+    const clamped = isNaN(n) ? (min ?? 0) : (min !== undefined ? Math.max(min, n) : n);
+    const final = max !== undefined ? Math.min(max, clamped) : clamped;
+    prevProp.current = final;
+    setRaw(String(final));
+    onChange(final);
+  }
+
   return (
     <input
       type="number" className={`${iCls} ${w}`}
-      value={value} min={min} max={max} step={step ?? 1}
-      onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+      value={raw} min={min} max={max} step={step ?? 1}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      onFocus={(e) => e.target.select()}
     />
   );
 }
