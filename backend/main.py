@@ -11,6 +11,7 @@ from core import db as core_db
 from core.config import settings
 from core.redis_bridge import subscribe_and_forward
 from core.websocket import manager
+from live.feed import run_feed
 from routers import analytics, auth, backtest, candles, copilot, diagnosis, g_optimize, health, lab, news, optimization, strategy, trading, ws
 from routers import settings as settings_router
 
@@ -18,11 +19,13 @@ logger = logging.getLogger(__name__)
 
 _redis_bridge_task: asyncio.Task | None = None
 _redis_bridge_stop = asyncio.Event()
+_feed_task: asyncio.Task | None = None
+_feed_stop: asyncio.Event = asyncio.Event()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    global _redis_bridge_task, _redis_bridge_stop
+    global _redis_bridge_task, _redis_bridge_stop, _feed_task, _feed_stop
 
     # --- Startup ---
     logger.info("Initialising database connection pool")
@@ -35,9 +38,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         name="redis-bridge",
     )
 
+    logger.info("Starting OANDA tick feed")
+    _feed_stop = asyncio.Event()
+    _feed_task = asyncio.create_task(run_feed(_feed_stop), name="oanda-feed")
+
     yield
 
     # --- Shutdown ---
+    logger.info("Stopping OANDA tick feed")
+    _feed_stop.set()
+    if _feed_task and not _feed_task.done():
+        _feed_task.cancel()
+        try:
+            await _feed_task
+        except asyncio.CancelledError:
+            pass
+
     logger.info("Shutting down Redis bridge")
     _redis_bridge_stop.set()
     if _redis_bridge_task and not _redis_bridge_task.done():
