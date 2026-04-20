@@ -499,7 +499,7 @@ async def update_saved_indicator(
     return _row_to_saved(row)
 
 
-@router.delete("/indicators/saved/{indicator_id}", status_code=204)
+@router.delete("/indicators/saved/{indicator_id}", status_code=204, response_model=None)
 async def delete_saved_indicator(
     indicator_id: UUID,
     user: Annotated[TokenData, Depends(get_current_user)],
