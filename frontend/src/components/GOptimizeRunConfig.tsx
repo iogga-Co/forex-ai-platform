@@ -57,6 +57,7 @@ type FormState = {
   trailing: TrailingSpec;
   rr_floor: number;
   pairs: string[];
+  timeframe: string;
   period_start: string;
   period_end: string;
   n_configs: number;
@@ -119,6 +120,7 @@ const DEFAULT_FORM: FormState = {
   trailing: { enabled: false, type: "atr", period: 14, multiplier_min: 1.0, multiplier_max: 2.0, pips_min: 10, pips_max: 30, activation_min: 1.0, activation_max: 2.0 },
   rr_floor: 1.5,
   pairs: [...ALL_PAIRS],
+  timeframe: "1H",
   period_start: "2022-01-01",
   period_end: "2025-01-01",
   n_configs: 5000,
@@ -390,6 +392,7 @@ export default function GOptimizeRunConfig({ onCreated, onCancel }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pairs: form.pairs,
+          timeframe: form.timeframe,
           period_start: form.period_start,
           period_end: form.period_end,
           n_configs: form.n_configs,
@@ -620,11 +623,19 @@ export default function GOptimizeRunConfig({ onCreated, onCancel }: Props) {
             )}
           </div>
 
-          {/* Timeframe (fixed) + period */}
+          {/* Timeframe + period */}
           <div className="flex items-center gap-3 flex-wrap mb-2">
             <label className="flex items-center gap-1.5">
               <span className={lCls}>Timeframe</span>
-              <span className="text-xs text-zinc-300 bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5">1H</span>
+              <select
+                className={`${sCls} w-16`}
+                value={form.timeframe}
+                onChange={(e) => set("timeframe", e.target.value)}
+              >
+                {["1m", "5m", "15m", "30m", "1H", "4H", "1D"].map((tf) => (
+                  <option key={tf}>{tf}</option>
+                ))}
+              </select>
             </label>
             <label className="flex items-center gap-1.5">
               <span className={lCls}>Start</span>

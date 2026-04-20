@@ -38,6 +38,25 @@ from engine.indicators import (
 
 logger = logging.getLogger(__name__)
 
+# Timeframes stored directly in ohlcv_candles
+_STORED_TF = {"1m", "1H"}
+
+# Minutes per bar — used to calculate indicator warmup window
+_TF_MINUTES: dict[str, int] = {
+    "1m": 1, "5m": 5, "15m": 15, "30m": 30,
+    "1H": 60, "4H": 240, "1D": 1440,
+}
+_WARMUP_BARS = 300
+
+def _warmup_delta(timeframe: str) -> datetime.timedelta:
+    """Return the timedelta covering WARMUP_BARS bars at the given timeframe."""
+    return datetime.timedelta(minutes=_WARMUP_BARS * _TF_MINUTES.get(timeframe, 60))
+
+_RESAMPLE_RULES: dict[str, str] = {
+    "5m": "5min", "15m": "15min", "30m": "30min", "4H": "4h", "1D": "1D",
+}
+_OHLCV_AGG = {"open": "first", "high": "max", "low": "min", "close": "last"}
+
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
 
 
@@ -172,49 +191,61 @@ async def get_backtest_candles(
     _: Annotated[TokenData | None, Depends(get_current_user)] = None,
 ) -> dict:
     """
-    Return OHLCV candles for the pair/period of a backtest run.
-
-    Always serves 1H candles regardless of the backtest timeframe — this keeps
-    the dataset manageable (≤ ~17 500 bars for a 2-year window) while giving
-    enough resolution to see trade context.  Trade markers are placed at their
-    exact entry/exit timestamps via the nearest 1H bar.
+    Return OHLCV candles for the pair/period of a backtest run at the run's
+    actual timeframe.  Derived timeframes (5m, 15m, 30m, 4H, 1D) are resampled
+    on-the-fly from stored 1m data.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
         run = await conn.fetchrow(
-            "SELECT pair, period_start, period_end FROM backtest_runs WHERE id = $1",
+            "SELECT pair, timeframe, period_start, period_end FROM backtest_runs WHERE id = $1",
             run_id,
         )
         if run is None:
             raise HTTPException(status_code=404, detail="Backtest result not found")
 
+        tf = run["timeframe"] or "1H"
+        fetch_tf = "1m" if tf not in _STORED_TF else tf
+
         candles = await conn.fetch(
             """
             SELECT timestamp, open, high, low, close
             FROM ohlcv_candles
-            WHERE pair = $1 AND timeframe = '1H'
-              AND timestamp >= $2 AND timestamp <= $3
+            WHERE pair = $1 AND timeframe = $2
+              AND timestamp >= $3 AND timestamp <= $4
             ORDER BY timestamp ASC
             """,
-            run["pair"],
-            run["period_start"],
-            run["period_end"],
+            run["pair"], fetch_tf,
+            run["period_start"], run["period_end"],
         )
 
-    return {
-        "pair": run["pair"],
-        "timeframe": "1H",
-        "candles": [
-            {
-                "time": int(c["timestamp"].timestamp()),
-                "open": float(c["open"]),
-                "high": float(c["high"]),
-                "low": float(c["low"]),
-                "close": float(c["close"]),
-            }
+    if not candles:
+        return {"pair": run["pair"], "timeframe": tf, "candles": []}
+
+    if tf not in _STORED_TF:
+        rule = _RESAMPLE_RULES[tf]
+        df = pd.DataFrame([
+            {"timestamp": r["timestamp"],
+             "open": float(r["open"]), "high": float(r["high"]),
+             "low": float(r["low"]),  "close": float(r["close"])}
+            for r in candles
+        ])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        df = df.set_index("timestamp").resample(rule, label="left", closed="left").agg(_OHLCV_AGG).dropna(subset=["close"])
+        result = [
+            {"time": int(ts.timestamp()), "open": row["open"], "high": row["high"],
+             "low": row["low"], "close": row["close"]}
+            for ts, row in df.iterrows()
+        ]
+    else:
+        result = [
+            {"time": int(c["timestamp"].timestamp()),
+             "open": float(c["open"]), "high": float(c["high"]),
+             "low": float(c["low"]),  "close": float(c["close"])}
             for c in candles
-        ],
-    }
+        ]
+
+    return {"pair": run["pair"], "timeframe": tf, "candles": result}
 
 
 @router.get("/backtest/{run_id}/indicators")
@@ -225,9 +256,10 @@ async def get_backtest_indicators(
     """
     Compute indicator series for all indicators referenced in the strategy's IR.
 
-    Fetches 1H OHLCV data with a 300-bar warmup window so indicator values at
-    period_start are fully primed.  Only data points from period_start onward
-    are returned.
+    Fetches OHLCV data at the backtest's actual timeframe with a 300-bar warmup
+    window so indicator values at period_start are fully primed.  Derived
+    timeframes are resampled on-the-fly from 1m data.  Only data points from
+    period_start onward are returned.
 
     Returns:
         indicators: list of indicator groups, each with:
@@ -242,7 +274,7 @@ async def get_backtest_indicators(
         async with pool.acquire() as conn:
             run = await conn.fetchrow(
                 """
-                SELECT br.pair, br.period_start, br.period_end, s.ir_json
+                SELECT br.pair, br.timeframe, br.period_start, br.period_end, s.ir_json
                 FROM backtest_runs br
                 JOIN strategies s ON s.id = br.strategy_id
                 WHERE br.id = $1
@@ -256,6 +288,9 @@ async def get_backtest_indicators(
             if not ir:
                 return {"indicators": []}
 
+            tf = run["timeframe"] or "1H"
+            fetch_tf = "1m" if tf not in _STORED_TF else tf
+
             # Convert DATE columns to UTC-aware datetimes for the timestamptz comparison
             def _to_dt(d: "datetime.date | datetime.datetime") -> datetime.datetime:
                 if isinstance(d, datetime.datetime):
@@ -265,19 +300,18 @@ async def get_backtest_indicators(
             ps_dt = _to_dt(run["period_start"])
             pe_dt = _to_dt(run["period_end"])
 
-            warmup_start = ps_dt - datetime.timedelta(hours=300)
+            warmup_start = ps_dt - _warmup_delta(fetch_tf)
             candle_rows = await conn.fetch(
                 """
                 SELECT timestamp, open, high, low, close
                 FROM ohlcv_candles
-                WHERE pair = $1 AND timeframe = '1H'
-                  AND timestamp >= $2
-                  AND timestamp <= $3
+                WHERE pair = $1 AND timeframe = $2
+                  AND timestamp >= $3
+                  AND timestamp <= $4
                 ORDER BY timestamp ASC
                 """,
-                run["pair"],
-                warmup_start,
-                pe_dt,
+                run["pair"], fetch_tf,
+                warmup_start, pe_dt,
             )
     except HTTPException:
         raise
@@ -289,15 +323,33 @@ async def get_backtest_indicators(
         return {"indicators": []}
 
     try:
+        # Build base DataFrame from raw rows, then resample if needed
+        raw_df = pd.DataFrame([
+            {"ts": r["timestamp"],
+             "open": float(r["open"]), "high": float(r["high"]),
+             "low": float(r["low"]),  "close": float(r["close"])}
+            for r in candle_rows
+        ])
+        raw_df["ts"] = pd.to_datetime(raw_df["ts"], utc=True)
+        raw_df = raw_df.set_index("ts").sort_index()
+
+        if tf not in _STORED_TF:
+            rule = _RESAMPLE_RULES[tf]
+            raw_df = (
+                raw_df.resample(rule, label="left", closed="left")
+                .agg({**_OHLCV_AGG, "low": "min"})
+                .dropna(subset=["close"])
+            )
+
         # Use integer Unix timestamps as the DataFrame index — avoids all
         # tz-aware vs tz-naive comparison issues entirely.
-        ts_ints = [int(r["timestamp"].timestamp()) for r in candle_rows]
+        ts_ints = [int(ts.timestamp()) for ts in raw_df.index]
         df = pd.DataFrame(
             {
-                "open": [float(r["open"]) for r in candle_rows],
-                "high": [float(r["high"]) for r in candle_rows],
-                "low": [float(r["low"]) for r in candle_rows],
-                "close": [float(r["close"]) for r in candle_rows],
+                "open": raw_df["open"].tolist(),
+                "high": raw_df["high"].tolist(),
+                "low": raw_df["low"].tolist(),
+                "close": raw_df["close"].tolist(),
             },
             index=ts_ints,
         )
