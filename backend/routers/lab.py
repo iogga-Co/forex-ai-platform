@@ -159,9 +159,9 @@ def _compute_indicators(df: pd.DataFrame, indicators: list[dict]) -> list[dict]:
                 result.append({
                     "id": f"BB_{p}", "type": "BB", "pane": "overlay",
                     "series": [
-                        {"name": f"BB Upper", "color": color, "data": _series_to_data(idx, upper)},
-                        {"name": f"BB Mid",   "color": color, "data": _series_to_data(idx, middle)},
-                        {"name": f"BB Lower", "color": color, "data": _series_to_data(idx, lower)},
+                        {"name": "BB Upper", "color": color, "data": _series_to_data(idx, upper)},
+                        {"name": "BB Mid",   "color": color, "data": _series_to_data(idx, middle)},
+                        {"name": "BB Lower", "color": color, "data": _series_to_data(idx, lower)},
                     ],
                 })
                 overlay_ci += 1
