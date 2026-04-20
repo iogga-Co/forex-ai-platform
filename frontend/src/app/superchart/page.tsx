@@ -89,6 +89,32 @@ interface BacktestResult {
 // Constants
 // ---------------------------------------------------------------------------
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+const SC_STORAGE_KEY = "superchart_state";
+
+// ---------------------------------------------------------------------------
+// localStorage persistence helpers
+// ---------------------------------------------------------------------------
+interface PersistedSCState {
+  pair: string;
+  timeframe: string;
+  dateFrom: string;
+  dateTo: string;
+  activeOsc: OscTab;
+  oscParams: OscParams;
+  chartOverlays: ChartOverlay[];
+  selectedStratId: string;
+  selectedBtId: string;
+}
+
+function scLoad(): Partial<PersistedSCState> {
+  try { return JSON.parse(localStorage.getItem(SC_STORAGE_KEY) ?? "{}"); } catch { return {}; }
+}
+function scSave(patch: Partial<PersistedSCState>) {
+  try { localStorage.setItem(SC_STORAGE_KEY, JSON.stringify({ ...scLoad(), ...patch })); } catch {}
+}
+function scClear() {
+  try { localStorage.removeItem(SC_STORAGE_KEY); } catch {}
+}
 const PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"];
 const TIMEFRAMES = ["1m", "1H"];
 
@@ -196,17 +222,17 @@ function SuperchartPageInner() {
   const searchParams = useSearchParams();
 
   // --- data controls ---
-  const [pair, setPair] = useState("EURUSD");
-  const [timeframe, setTimeframe] = useState("1H");
-  const [dateFrom, setDateFrom] = useState(defaultDateFrom);
-  const [dateTo, setDateTo] = useState(defaultDateTo);
+  const [pair, setPair] = useState<string>(() => scLoad().pair ?? "EURUSD");
+  const [timeframe, setTimeframe] = useState<string>(() => scLoad().timeframe ?? "1H");
+  const [dateFrom, setDateFrom] = useState<string>(() => scLoad().dateFrom ?? defaultDateFrom());
+  const [dateTo, setDateTo] = useState<string>(() => scLoad().dateTo ?? defaultDateTo());
 
   // --- loaded data ---
   const [candles, setCandles] = useState<Candle[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
-  const [selectedStratId, setSelectedStratId] = useState<string>("");
+  const [selectedStratId, setSelectedStratId] = useState<string>(() => scLoad().selectedStratId ?? "");
   const [backtests, setBacktests] = useState<BacktestResult[]>([]);
-  const [selectedBtId, setSelectedBtId] = useState<string>("");
+  const [selectedBtId, setSelectedBtId] = useState<string>(() => scLoad().selectedBtId ?? "");
   const [trades, setTrades] = useState<Trade[]>([]);
 
   // --- strategy IR (editable copy) ---
@@ -214,7 +240,7 @@ function SuperchartPageInner() {
   const [originalSIR, setOriginalSIR] = useState<StrategyIR | null>(null);
 
   // --- chart indicator overlays ---
-  const [chartOverlays, setChartOverlays] = useState<ChartOverlay[]>([]);
+  const [chartOverlays, setChartOverlays] = useState<ChartOverlay[]>(() => scLoad().chartOverlays ?? []);
   const [newOverlayType, setNewOverlayType] = useState<IndicatorType>("EMA");
   const userOverlaySeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const userSubSeriesRef = useRef<ISeriesApi<"Line" | "Histogram">[]>([]);
@@ -226,8 +252,8 @@ function SuperchartPageInner() {
 
   // --- UI state ---
   const [loadingCandles, setLoadingCandles] = useState(false);
-  const [activeOsc, setActiveOsc] = useState<OscTab>("RSI");
-  const [oscParams, setOscParams] = useState<OscParams>(DEFAULT_OSC_PARAMS);
+  const [activeOsc, setActiveOsc] = useState<OscTab>(() => scLoad().activeOsc ?? "RSI");
+  const [oscParams, setOscParams] = useState<OscParams>(() => ({ ...DEFAULT_OSC_PARAMS, ...scLoad().oscParams }));
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftError, setDraftError] = useState("");
 
@@ -328,8 +354,11 @@ function SuperchartPageInner() {
       .then((data: Strategy[]) => {
         setStrategies(data);
         const urlStratId = searchParams.get("strategy_id");
-        const initial = urlStratId && data.find((s) => s.id === urlStratId)
+        const savedStratId = scLoad().selectedStratId;
+        const initial = (urlStratId && data.find((s) => s.id === urlStratId))
           ? urlStratId
+          : (savedStratId && data.find((s) => s.id === savedStratId))
+          ? savedStratId
           : data.length > 0 ? data[0].id : "";
         setSelectedStratId(initial);
       })
@@ -377,7 +406,12 @@ function SuperchartPageInner() {
       .then((data: BacktestResult[]) => {
         setBacktests(data);
         const urlBtId = searchParams.get("backtest_id");
-        const initial = urlBtId && data.find((b) => b.id === urlBtId) ? urlBtId : "";
+        const savedBtId = scLoad().selectedBtId;
+        const initial = (urlBtId && data.find((b) => b.id === urlBtId))
+          ? urlBtId
+          : (savedBtId && data.find((b) => b.id === savedBtId))
+          ? savedBtId
+          : "";
         setSelectedBtId(initial);
         setTrades([]);
       })
@@ -724,6 +758,30 @@ function SuperchartPageInner() {
   }, [trades]);
 
   // ---------------------------------------------------------------------------
+  // Persist chart state to localStorage on every relevant change
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    scSave({ pair, timeframe, dateFrom, dateTo, activeOsc, oscParams, chartOverlays, selectedStratId, selectedBtId });
+  }, [pair, timeframe, dateFrom, dateTo, activeOsc, oscParams, chartOverlays, selectedStratId, selectedBtId]);
+
+  // ---------------------------------------------------------------------------
+  // Reset — clears localStorage and returns everything to defaults
+  // ---------------------------------------------------------------------------
+  function handleReset() {
+    scClear();
+    setPair("EURUSD");
+    setTimeframe("1H");
+    setDateFrom(defaultDateFrom());
+    setDateTo(defaultDateTo());
+    setActiveOsc("RSI");
+    setOscParams(DEFAULT_OSC_PARAMS);
+    setChartOverlays([]);
+    setSelectedBtId("");
+    setTrades([]);
+    if (strategies.length > 0) setSelectedStratId(strategies[0].id);
+  }
+
+  // ---------------------------------------------------------------------------
   // Derived state
   // ---------------------------------------------------------------------------
   const isModified = currentSIR && originalSIR
@@ -892,6 +950,13 @@ function SuperchartPageInner() {
             className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             Refine
+          </button>
+          <button
+            onClick={handleReset}
+            className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/40 transition-colors ml-1"
+            title="Reset chart to defaults and clear saved state"
+          >
+            Reset
           </button>
         </div>
       </div>
