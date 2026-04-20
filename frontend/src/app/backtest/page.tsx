@@ -41,7 +41,7 @@ interface RunSummary {
 }
 
 const PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"];
-const TIMEFRAMES = ["1m", "1H"];
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"];
 
 interface ParamDef { key: string; label: string; step: number; min: number; isInt?: boolean }
 

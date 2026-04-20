@@ -26,6 +26,20 @@ logger = logging.getLogger(__name__)
 
 _BATCH_SIZE = 1_000
 
+# Timeframes stored directly in ohlcv_candles
+_STORED_TIMEFRAMES = {"1m", "1H"}
+
+# Resample rules for derived timeframes (computed on-the-fly from 1m data)
+_RESAMPLE_RULES: dict[str, str] = {
+    "5m":  "5min",
+    "15m": "15min",
+    "30m": "30min",
+    "4H":  "4h",
+    "1D":  "1D",
+}
+
+_OHLCV_AGG = {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+
 
 @contextmanager
 def get_sync_conn(dsn: str) -> Generator[psycopg2.extensions.connection, None, None]:
@@ -101,13 +115,36 @@ def fetch_candles(
     """
     Fetch OHLCV candles for a given pair/timeframe/range from TimescaleDB.
 
+    Timeframes stored directly (1m, 1H) are queried as-is.
+    All other timeframes (5m, 15m, 30m, 4H, 1D) are derived on-the-fly
+    by fetching 1m data and resampling with pandas — no extra storage needed.
+
     Returns a DataFrame with:
     - DatetimeIndex: UTC-aware timestamps (bar open times)
     - Columns: open, high, low, close, volume (all float64)
-
-    The Decimal values from NUMERIC columns are explicitly cast to float64
-    here so callers never need to worry about type issues in indicator code.
     """
+    if timeframe not in _STORED_TIMEFRAMES:
+        rule = _RESAMPLE_RULES.get(timeframe)
+        if rule is None:
+            raise ValueError(f"Unsupported timeframe: {timeframe!r}")
+        df_1m = _fetch_stored_candles(conn, pair, "1m", start, end)
+        if df_1m.empty:
+            return df_1m
+        return (
+            df_1m.resample(rule, label="left", closed="left")
+            .agg(_OHLCV_AGG)
+            .dropna(subset=["close"])
+        )
+    return _fetch_stored_candles(conn, pair, timeframe, start, end)
+
+
+def _fetch_stored_candles(
+    conn: psycopg2.extensions.connection,
+    pair: str,
+    timeframe: str,
+    start: datetime,
+    end: datetime,
+) -> pd.DataFrame:
     sql = """
         SELECT timestamp, open, high, low, close, volume
         FROM ohlcv_candles
@@ -133,8 +170,6 @@ def fetch_candles(
     )
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
     df = df.set_index("timestamp").sort_index()
-
-    # Cast NUMERIC → float64 so indicator functions receive the expected dtype
     return df.astype("float64")
 
 
