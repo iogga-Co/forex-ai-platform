@@ -226,7 +226,7 @@ function ConditionRow({ cond, onUpdate, onRemove, isExit = false }: {
       ) : cond.indicator === "BB" ? (
         <>
           <Range label="period" vMin={cond.period_min} vMax={cond.period_max} onMin={(v) => onUpdate({ period_min: v })} onMax={(v) => onUpdate({ period_max: v })} />
-          <Range label="σ" vMin={cond.std_dev_min} vMax={cond.std_dev_max} onMin={(v) => onUpdate({ std_dev_min: v })} onMax={(v) => onUpdate({ std_dev_max: v })} step={0.1} />
+          <Range label="σ" vMin={cond.std_dev_min} vMax={cond.std_dev_max} onMin={(v) => onUpdate({ std_dev_min: v })} onMax={(v) => onUpdate({ std_dev_max: v })} step={0.01} />
           <label className="flex items-center gap-0.5">
             <span className={lCls}>band</span>
             <select className={`${sCls} w-16`} value={cond.bb_component} onChange={(e) => onUpdate({ bb_component: e.target.value })}>
@@ -253,7 +253,7 @@ function ConditionRow({ cond, onUpdate, onRemove, isExit = false }: {
       {hasVal && (
         <Range label="val" vMin={cond.value_min} vMax={cond.value_max}
           onMin={(v) => onUpdate({ value_min: v })} onMax={(v) => onUpdate({ value_max: v })}
-          step={0.1} />
+          step={0.01} />
       )}
 
       {/* Remove */}
@@ -392,7 +392,7 @@ export default function GOptimizeRunConfig({ onCreated, onCancel }: Props) {
   // Render
   // -------------------------------------------------------------------------
   return (
-    <div className="flex flex-col overflow-hidden">
+    <div className="flex flex-col flex-1 overflow-hidden">
       {/* Scrollable form body */}
       <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
 
@@ -500,14 +500,16 @@ export default function GOptimizeRunConfig({ onCreated, onCancel }: Props) {
                   <div className="flex items-center gap-2 flex-wrap">
                     <label className="flex items-center gap-0.5">
                       <span className={lCls}>period</span>
-                      <NumInput value={spec.period} onChange={(v) => set(side, { ...spec, period: v })} min={1} max={50} />
+                      <NumInput value={spec.period} onChange={(v) => set(side, { ...spec, period: Math.min(200, Math.max(1, Math.round(v))) })} min={1} max={200} step={1} />
+                      <span className={lCls}>(1–200)</span>
                     </label>
                     <Range label="mult" vMin={spec.multiplier_min} vMax={spec.multiplier_max}
                       onMin={(v) => set(side, { ...spec, multiplier_min: v })}
-                      onMax={(v) => set(side, { ...spec, multiplier_max: v })} step={0.1} />
+                      onMax={(v) => set(side, { ...spec, multiplier_max: v })} step={0.01} />
                     <label className="flex items-center gap-0.5">
                       <span className={lCls}>step</span>
-                      <NumInput value={spec.multiplier_step} onChange={(v) => set(side, { ...spec, multiplier_step: v })} step={0.1} min={0.1} />
+                      <NumInput value={spec.multiplier_step} onChange={(v) => set(side, { ...spec, multiplier_step: Math.max(0.01, v) })} step={0.01} min={0.01} />
+                      <span className={lCls}>(min 0.01)</span>
                     </label>
                   </div>
                 ) : (
@@ -541,14 +543,15 @@ export default function GOptimizeRunConfig({ onCreated, onCancel }: Props) {
                   <>
                     <label className="flex items-center gap-0.5">
                       <span className={lCls}>period</span>
-                      <NumInput value={form.trailing.period} onChange={(v) => set("trailing", { ...form.trailing, period: v })} min={1} />
+                      <NumInput value={form.trailing.period} onChange={(v) => set("trailing", { ...form.trailing, period: Math.max(1, Math.round(v)) })} min={1} step={1} />
+                      <span className={lCls}>(min 1)</span>
                     </label>
                     <Range label="mult" vMin={form.trailing.multiplier_min} vMax={form.trailing.multiplier_max}
                       onMin={(v) => set("trailing", { ...form.trailing, multiplier_min: v })}
-                      onMax={(v) => set("trailing", { ...form.trailing, multiplier_max: v })} step={0.1} />
+                      onMax={(v) => set("trailing", { ...form.trailing, multiplier_max: v })} step={0.01} />
                     <Range label="act×ATR" vMin={form.trailing.activation_min} vMax={form.trailing.activation_max}
                       onMin={(v) => set("trailing", { ...form.trailing, activation_min: v })}
-                      onMax={(v) => set("trailing", { ...form.trailing, activation_max: v })} step={0.1} />
+                      onMax={(v) => set("trailing", { ...form.trailing, activation_max: v })} step={0.01} />
                   </>
                 ) : (
                   <Range label="pips" vMin={form.trailing.pips_min} vMax={form.trailing.pips_max}
@@ -562,7 +565,8 @@ export default function GOptimizeRunConfig({ onCreated, onCancel }: Props) {
           {/* R:R floor */}
           <label className="flex items-center gap-1.5">
             <span className={lCls}>R:R floor (TP ≥ N × SL)</span>
-            <NumInput value={form.rr_floor} onChange={(v) => set("rr_floor", v)} min={0.5} step={0.1} w="w-14" />
+            <NumInput value={form.rr_floor} onChange={(v) => set("rr_floor", Math.max(0.1, v))} min={0.1} step={0.01} w="w-14" />
+            <span className={lCls}>(min 0.1)</span>
           </label>
         </div>
 
@@ -613,7 +617,8 @@ export default function GOptimizeRunConfig({ onCreated, onCancel }: Props) {
             <div className="flex flex-col gap-0.5">
               <label className="flex items-center gap-1.5">
                 <span className={lCls}>Configs to sample</span>
-                <NumInput value={form.n_configs} onChange={(v) => set("n_configs", v)} min={100} step={500} w="w-20" />
+                <NumInput value={form.n_configs} onChange={(v) => set("n_configs", Math.max(100, Math.round(v)))} min={100} step={1} w="w-20" />
+                <span className={lCls}>min 100</span>
               </label>
               {form.n_configs < 100 && (
                 <p className="text-[10px] text-red-400">Minimum 100 configs.</p>
@@ -658,7 +663,7 @@ export default function GOptimizeRunConfig({ onCreated, onCancel }: Props) {
             </label>
             <label className="flex items-center gap-1">
               <span className={lCls}>Min trades</span>
-              <NumInput value={form.threshold_min_trades} onChange={(v) => set("threshold_min_trades", v)} step={5} min={1} w="w-14" />
+              <NumInput value={form.threshold_min_trades} onChange={(v) => set("threshold_min_trades", Math.max(1, Math.round(v)))} step={1} min={1} w="w-14" />
             </label>
           </div>
           <label className="flex items-center gap-1.5 cursor-pointer">

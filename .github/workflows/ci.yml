@@ -293,8 +293,12 @@ jobs:
             cd /opt/forex-ai-platform
             git pull origin main
             doppler run -- docker compose build fastapi celery nextjs
+            # Apply any new DB migrations (idempotent — errors on already-applied are ignored)
+            doppler run -- bash -c 'for f in db/migrations/*.sql; do
+              docker exec forex-ai-platform-timescaledb-1 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "/docker-entrypoint-initdb.d/$(basename $f)" 2>&1 | grep -Ev "already exists|^$" || true
+            done'
             # Recreate backend first so fastapi is available before nginx reloads
-            doppler run -- docker compose up -d --remove-orphans --force-recreate fastapi celery
+            doppler run -- docker compose up -d --remove-orphans --force-recreate fastapi celery celery-g-optimize
             # Brief wait for fastapi to register in Docker DNS
             sleep 5
             doppler run -- docker compose up -d --force-recreate nextjs
