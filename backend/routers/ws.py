@@ -70,3 +70,46 @@ async def price_feed(websocket: WebSocket, pair: str) -> None:
                 await r.aclose()
             except Exception:
                 pass
+
+
+@router.websocket("/ws/signals")
+async def signal_feed(websocket: WebSocket) -> None:
+    """
+    Real-time signal log.
+
+    On connect: replays the last SIGNAL_LOG_MAX signals from Redis list
+    live:signal_log (oldest first), then streams new signals from the
+    live:signals pub/sub channel as they arrive.
+
+    Each message is a JSON signal dict published by live/engine.py.
+    No auth required — signals contain no sensitive financial data.
+    """
+    await websocket.accept()
+    r: aioredis.Redis | None = None
+    try:
+        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+        # Replay history (stored newest-first, so reverse for chronological order)
+        history = await r.lrange("live:signal_log", 0, -1)
+        for item in reversed(history):
+            await websocket.send_text(item)
+
+        # Subscribe for real-time signals
+        pubsub = r.pubsub()
+        await pubsub.subscribe("live:signals")
+        while True:
+            msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=20.0)
+            if msg is None:
+                await websocket.send_text(json.dumps({"type": "keepalive"}))
+                continue
+            await websocket.send_text(msg["data"])
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.warning("Signal WS error: %s", exc)
+    finally:
+        if r is not None:
+            try:
+                await r.aclose()
+            except Exception:
+                pass

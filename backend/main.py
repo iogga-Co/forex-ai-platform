@@ -11,6 +11,7 @@ from core import db as core_db
 from core.config import settings
 from core.redis_bridge import subscribe_and_forward
 from core.websocket import manager
+from live.engine import run_engine
 from live.feed import run_feed
 from routers import analytics, auth, backtest, candles, copilot, diagnosis, g_optimize, health, lab, news, optimization, strategy, trading, ws
 from routers import settings as settings_router
@@ -19,13 +20,15 @@ logger = logging.getLogger(__name__)
 
 _redis_bridge_task: asyncio.Task | None = None
 _redis_bridge_stop = asyncio.Event()
-_feed_task: asyncio.Task | None = None
-_feed_stop: asyncio.Event = asyncio.Event()
+_feed_task:   asyncio.Task | None = None
+_feed_stop:   asyncio.Event = asyncio.Event()
+_engine_task: asyncio.Task | None = None
+_engine_stop: asyncio.Event = asyncio.Event()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    global _redis_bridge_task, _redis_bridge_stop, _feed_task, _feed_stop
+    global _redis_bridge_task, _redis_bridge_stop, _feed_task, _feed_stop, _engine_task, _engine_stop
 
     # --- Startup ---
     logger.info("Initialising database connection pool")
@@ -42,9 +45,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _feed_stop = asyncio.Event()
     _feed_task = asyncio.create_task(run_feed(_feed_stop), name="oanda-feed")
 
+    logger.info("Starting signal engine")
+    _engine_stop = asyncio.Event()
+    pool = await core_db.get_pool()
+    _engine_task = asyncio.create_task(run_engine(_engine_stop, pool), name="signal-engine")
+
     yield
 
     # --- Shutdown ---
+    logger.info("Stopping signal engine")
+    _engine_stop.set()
+    if _engine_task and not _engine_task.done():
+        _engine_task.cancel()
+        try:
+            await _engine_task
+        except asyncio.CancelledError:
+            pass
+
     logger.info("Stopping OANDA tick feed")
     _feed_stop.set()
     if _feed_task and not _feed_task.done():
