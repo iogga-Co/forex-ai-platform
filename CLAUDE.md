@@ -20,9 +20,9 @@ AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (
 | 1 | Core Engine | ✅ Complete |
 | 2 | AI Intelligence | ✅ Complete |
 | 3 | Analytics Suite | ✅ Complete |
-| 3.5 | Indicator Lab | 🚧 In progress — PR #108 merged (backend); frontend PR 2 next |
+| 3.5 | Indicator Lab | ✅ Complete — PRs #108–#113 merged |
 | 3.6 | G-Optimize | ✅ Complete — PR #102 |
-| 4 | Live Trading | 🚧 In progress — PR #106 open (feed + price ticker) |
+| 4 | Live Trading | 🚧 In progress — PR #106 merged (feed + price ticker); PR 2 next |
 | 5 | Production Launch | 🔲 Pending |
 
 ---
@@ -561,9 +561,15 @@ Detailed specs for planned features live in `docs/specs/`:
 
 | Spec | File | Phase | Status |
 |---|---|---|---|
-| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — visual sandbox, AI suggestions, saves as Indicator or Strategy; Superchart overlay integration | 🚧 PR #108 merged (backend); frontend PRs 2–5 in progress |
+| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — visual sandbox, AI suggestions, saves as Indicator or Strategy; Superchart overlay integration | ✅ Complete — PRs #108–#113 |
 | G-Optimize | `docs/specs/g-optimize.md` | 3.6 — global automated strategy discovery: random param search → backtest → RAG inject → Co-Pilot ranking | ✅ Complete (PR #102) |
 | ML Signal Engine | `docs/specs/ml-engine.md` | 5 — LightGBM model, single inference path for backtest + live, model registry | 🔲 Specced |
+
+### Indicator Lab — `indicator_id` URL param
+
+`/superchart?indicator_id={id}` pre-loads a saved indicator as a dotted overlay when Superchart opens. Constructed by the "SC" button in the Lab Library panel. The Superchart fetches `GET /api/lab/indicators/saved`, finds the matching entry, calls `POST /api/lab/indicators` with its config + current pair/TF/dates, and renders the series as dotted lines.
+
+`/lab?pair={pair}&timeframe={tf}` — "Open in Lab" button in Superchart toolbar pre-fills the pair and timeframe.
 
 ---
 
