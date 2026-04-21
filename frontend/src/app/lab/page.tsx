@@ -36,6 +36,13 @@ interface SeriesData { name: string; color: string; data: {time:number;value:num
 interface IndicatorGroup { id: string; type: string; pane: string; levels?: {value:number;color:string}[]; series: SeriesData[]; }
 interface Candle { time: number; open: number; high: number; low: number; close: number; }
 
+interface Suggestion {
+  tool:    "add_indicator" | "set_param" | "add_condition";
+  label:   string;
+  reason:  string;
+  payload: Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -122,6 +129,12 @@ function LabInner() {
   const [saving,    setSaving]    = useState(false);
   const [saveMsg,   setSaveMsg]   = useState("");
   const [exporting, setExporting] = useState(false);
+
+  // AI panel
+  const [analysing,    setAnalysing]    = useState(false);
+  const [aiText,       setAiText]       = useState("");
+  const [suggestions,  setSuggestions]  = useState<Suggestion[]>([]);
+  const [aiError,      setAiError]      = useState("");
 
   // Chart refs
   const mainDivRef    = useRef<HTMLDivElement>(null);
@@ -488,6 +501,77 @@ function LabInner() {
   }
 
   // ---------------------------------------------------------------------------
+  // AI analysis
+  // ---------------------------------------------------------------------------
+  async function analyzeChart() {
+    if (indicators.length === 0) return;
+    setAnalysing(true); setAiText(""); setSuggestions([]); setAiError("");
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/lab/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pair, timeframe,
+          indicators: indicators.map(i => ({
+            type: i.type,
+            params: { period:i.period, fast:i.fast, slow:i.slow, signal_period:i.signal_period,
+                      std_dev:i.std_dev, k_smooth:i.k_smooth, d_period:i.d_period },
+          })),
+          conditions: conditions.map(c => ({
+            indicator:c.indicator, operator:c.operator, period:c.period, value:c.value,
+          })),
+          signal_count: signals.length,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as {detail?:string}).detail ?? `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setAiText(data.text ?? "");
+      setSuggestions(data.suggestions ?? []);
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "Analysis failed");
+    } finally {
+      setAnalysing(false);
+    }
+  }
+
+  function applySuggestion(s: Suggestion) {
+    if (s.tool === "add_indicator") {
+      const p    = s.payload as { type: IndType; params: Record<string,number> };
+      const type = p.type as IndType;
+      const color = COLORS[indicators.length % COLORS.length];
+      const ind: LabIndicator = {
+        id: uid(), type, color,
+        period: 14, fast: 12, slow: 26, signal_period: 9, std_dev: 2.0, k_smooth: 3, d_period: 3,
+        ...DEFAULTS[type],
+        ...p.params,
+      };
+      const next = [...indicators, ind];
+      setIndicators(next);
+      scheduleRecompute(next, conditions);
+
+    } else if (s.tool === "set_param") {
+      const p = s.payload as { indicator_type: string; param: string; value: number };
+      const next = indicators.map(i =>
+        i.type === p.indicator_type ? { ...i, [p.param]: p.value } : i
+      );
+      setIndicators(next);
+      scheduleRecompute(next, conditions);
+
+    } else if (s.tool === "add_condition") {
+      const p = s.payload as { indicator:string; operator:string; period:number; value?:number };
+      const next = [...conditions, {
+        id: uid(), indicator: p.indicator, operator: p.operator,
+        period: p.period, value: p.value ?? 0,
+      }];
+      setConditions(next);
+      scheduleRecompute(indicators, next);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Derived
   // ---------------------------------------------------------------------------
   const uniqueOscTypes = [...new Set(indicators.filter(i => OSC_TYPES.has(i.type)).map(i => i.type))] as OscTab[];
@@ -792,6 +876,65 @@ function LabInner() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* ── AI Analysis panel ──────────────────────────────────── */}
+        <div className="w-60 shrink-0 border-l border-zinc-800 flex flex-col overflow-hidden">
+          <div className="border-b border-zinc-800 px-3 py-2 shrink-0">
+            <div className={`${lCls} font-semibold uppercase tracking-widest mb-2`}>AI Analysis</div>
+            <button
+              onClick={analyzeChart}
+              disabled={analysing || indicators.length === 0}
+              className="w-full rounded border border-blue-700 px-2 py-1 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              {analysing ? "Analysing…" : "Analyse Chart"}
+            </button>
+            {indicators.length === 0 && (
+              <p className="text-[10px] text-zinc-600 mt-1">Add indicators first</p>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
+            {/* Error */}
+            {aiError && (
+              <p className="text-[10px] text-red-400 border border-red-800 rounded px-2 py-1">{aiError}</p>
+            )}
+
+            {/* Analysis text */}
+            {aiText && (
+              <div className="text-[11px] text-zinc-300 leading-relaxed border-b border-zinc-800 pb-3">
+                {aiText}
+              </div>
+            )}
+
+            {/* Suggestion cards */}
+            {suggestions.length > 0 && (
+              <div className="space-y-2">
+                <div className={`${lCls} font-semibold uppercase tracking-widest`}>Suggestions</div>
+                {suggestions.map((s, i) => (
+                  <div key={i} className="rounded border border-zinc-700 bg-zinc-800/60 px-2 py-2 space-y-1.5">
+                    <p className="text-[11px] font-semibold text-zinc-200">{s.label}</p>
+                    {s.reason && (
+                      <p className="text-[10px] text-zinc-500 leading-tight">{s.reason}</p>
+                    )}
+                    <button
+                      onClick={() => applySuggestion(s)}
+                      className="w-full rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!analysing && !aiText && !aiError && (
+              <p className="text-[10px] text-zinc-600">
+                Click &quot;Analyse Chart&quot; to get AI observations and improvement suggestions.
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>
