@@ -25,7 +25,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from core.auth import TokenData, get_current_user, get_current_user_sse
+from core.auth import TokenData, get_current_user
 from core.db import get_pool
 from engine.indicators import (
     adx as calc_adx,
@@ -515,11 +515,40 @@ async def delete_saved_indicator(
 
 
 # ---------------------------------------------------------------------------
-# POST /api/lab/analyze — SSE (stub for PR 4)
+# POST /api/lab/analyze — AI chart analysis
 # ---------------------------------------------------------------------------
+
+class AnalyzeRequest(BaseModel):
+    pair:         str
+    timeframe:    str = "1H"
+    indicators:   list[dict] = Field(default_factory=list)
+    conditions:   list[dict] = Field(default_factory=list)
+    signal_count: int = 0
+    model:        str = "claude-sonnet-4-6"
+
 
 @router.post("/analyze")
 async def analyze_chart(
-    _user: Annotated[TokenData, Depends(get_current_user_sse)],
+    payload: AnalyzeRequest,
+    user: Annotated[TokenData, Depends(get_current_user)],
 ) -> dict:
-    raise HTTPException(status_code=501, detail="AI analysis implemented in Lab PR 4")
+    """
+    Analyse the current Indicator Lab chart state with Claude and return
+    a brief text analysis plus up to 3 structured improvement suggestions.
+    """
+    from ai.lab_agent import analyze_chart as _analyze
+
+    try:
+        result = await _analyze(
+            pair=payload.pair,
+            timeframe=payload.timeframe,
+            indicators=payload.indicators,
+            conditions=payload.conditions,
+            signal_count=payload.signal_count,
+            model=payload.model,
+        )
+    except Exception as exc:
+        logger.error("Lab analyze failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return result
