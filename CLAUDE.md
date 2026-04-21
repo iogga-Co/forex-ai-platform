@@ -20,9 +20,9 @@ AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (
 | 1 | Core Engine | ✅ Complete |
 | 2 | AI Intelligence | ✅ Complete |
 | 3 | Analytics Suite | ✅ Complete |
-| 3.5 | Indicator Lab | 🔲 Specced — `docs/specs/indicator-lab.md` |
+| 3.5 | Indicator Lab | 🚧 In progress — PR #108 merged (backend); frontend PR 2 next |
 | 3.6 | G-Optimize | ✅ Complete — PR #102 |
-| 4 | Live Trading | 🔲 Next |
+| 4 | Live Trading | 🚧 In progress — PR #106 open (feed + price ticker) |
 | 5 | Production Launch | 🔲 Pending |
 
 ---
@@ -33,20 +33,21 @@ AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (
 forex-ai-platform/
 ├── backend/
 │   ├── routers/          # FastAPI route handlers (auth, backtest, strategy, optimization,
-│   │                     #   analytics, copilot, candles, trading, ws, diagnosis)
+│   │                     #   analytics, copilot, candles, trading, ws, diagnosis, lab)
 │   ├── engine/           # Backtesting engine (sir.py — SIR schema, parser.py, runner.py,
 │   │                     #   indicators.py, metrics.py, filters.py, sizing.py)
 │   ├── tasks/            # Celery tasks (backtest.py, optimization.py, g_optimize.py)
 │   ├── ai/               # model_router.py (provider dispatch), claude/openai/gemini clients,
 │   │                     #   optimization_agent.py, g_optimize_agent.py, Voyage AI retrieval,
 │   │                     #   strategy_diagnosis.py, trade_analysis.py, period_diagnosis.py
+│   ├── live/             # Phase 4 live trading: oanda.py (OANDA client), feed.py (tick stream)
 │   ├── core/             # Config, DB pool, auth (JWT)
 │   ├── data/             # OHLCV ingest pipeline, quality checks
 │   └── scripts/          # backfill.py — historical data loader; seed_demo.py — demo data seed
 ├── frontend/
 │   └── src/
-│       ├── app/          # Next.js pages: backtest, copilot, dashboard, g-optimize, lab, live,
-│       │                 #   login, news, optimization, settings, strategies, superchart
+│       ├── app/          # Next.js pages: backtest, copilot, dashboard, g-optimize, lab (stub),
+│       │                 #   live, login, news, optimization, settings, strategies, superchart
 │       ├── components/   # BacktestResultPanel, TradeAnalysisSidebar, AuthGuard, etc.
 │       └── lib/          # auth.ts, settings.ts, strategyLabels.ts
 ├── db/migrations/        # SQL migration files (apply manually on existing DB)
@@ -416,6 +417,7 @@ All API calls use `fetchWithAuth` from `@/lib/auth` — automatically attaches t
 ### localStorage keys
 
 - `copilot_system_prompt` — persisted system prompt in Co-Pilot tab; written on every keystroke, read on mount
+- `superchart_state` — full Superchart state persisted across navigation: pair, timeframe, date range, active oscillator, osc params, chart overlays, selected strategy/backtest. Restored on mount; URL params (`strategy_id`, `backtest_id`) still take priority. Reset button in toolbar clears it.
 - Settings keys managed via `@/lib/settings`
 
 ### Batch delete pattern (checkboxes)
@@ -456,16 +458,34 @@ docker exec forex-ai-platform-timescaledb-1 psql -U forex_user -d forex_db -f /p
 | `trades` | Individual trade records (pnl, r_multiple, mae, mfe, entry_time, exit_time, direction) |
 | `optimization_runs` | Optimization session metadata; `model VARCHAR(60)` column (migration 016) |
 | `optimization_iterations` | Per-iteration results with `strategy_ir` JSONB |
-| `ohlcv_candles` | TimescaleDB hypertable — 6 pairs × 2 timeframes |
+| `ohlcv_candles` | TimescaleDB hypertable — 6 pairs × 2 stored timeframes (`1m`, `1H`) |
 | `ai_usage_log` | Token usage per AI call — model, feature, input/output counts (migration 015) |
 | `news_events` | ForexFactory calendar events — `UNIQUE(event_time, currency, title)` |
+| `live_orders` | Live trade execution records — status, direction, size, entry/exit prices, SL/TP, R-multiple, shadow_mode (migration 007 + 020) |
+| `saved_indicators` | Indicator Lab: named indicator configs (indicator_config JSONB, signal_conditions JSONB) — migration 021 |
 
 **Note:** There is NO separate `backtest_results` table. `backtest_runs` is the single table for both job metadata and result metrics. All diagnosis/analytics queries use `FROM backtest_runs`.
 
 ### OHLCV coverage
 
 All 6 pairs fully loaded: `EURUSD`, `GBPUSD`, `USDJPY`, `EURGBP`, `GBPJPY`, `USDCHF`  
-Coverage: April 2021 – April 2026 · Timeframes: `1m`, `1H`
+Coverage: April 2021 – April 2026 · Stored timeframes: `1m`, `1H`
+
+### On-the-fly timeframe resampling
+
+`data/db.py` `fetch_candles()` and `routers/candles.py` both support 7 timeframes. Only `1m` and `1H` are stored in `ohlcv_candles`. The other 5 are resampled from `1m` at query time using pandas:
+
+| Timeframe | Pandas rule | Source |
+|---|---|---|
+| `1m` | — | stored |
+| `5m` | `5min` | resampled from 1m |
+| `15m` | `15min` | resampled from 1m |
+| `30m` | `30min` | resampled from 1m |
+| `1H` | — | stored |
+| `4H` | `4h` | resampled from 1m |
+| `1D` | `1D` | resampled from 1m |
+
+OHLCV aggregation: `open=first, high=max, low=min, close=last, volume=sum`. The analytics indicator overlay endpoints scale the 300-bar warmup window by `minutes_per_bar` so indicators are always fully primed regardless of timeframe.
 
 ---
 
@@ -512,7 +532,8 @@ echo "IMAGE_PREFIX=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper
 - pytest exit code 5 = no tests collected (not a failure) — handle with `pytest ... || [ $? -eq 5 ]`
 - Staging deploy only fires on `push` to main, not `workflow_dispatch`
 - `npm ci` requires `package-lock.json` in sync — commit both together after any `npm install`
-- **Deploy order matters:** recreate `fastapi celery` first → `sleep 5` → recreate `nextjs` → `nginx -s reload`. Recreating all simultaneously can leave nginx unable to resolve `fastapi` upstream if nginx restarts during the window when fastapi is gone.
+- **Deploy order matters:** recreate `fastapi celery celery-g-optimize` first → `sleep 5` → recreate `nextjs` → `nginx -s reload`. All three backend services must be listed — `celery-g-optimize` was previously omitted and ran stale code after every deploy.
+- **DB migrations in deploy:** CI deploy script runs all migrations via `doppler run -- bash -c 'for f in db/migrations/*.sql; do psql ... -f ...; done'` with `|| true` so already-applied migrations are ignored silently. Migrations are NOT auto-applied on existing volumes — always add a migration file; the CI loop handles it.
 - **Nginx reload fallback:** `nginx -s reload 2>/dev/null || docker compose up -d --force-recreate nginx` — if nginx crashed, bring it back rather than exiting CI with code 1.
 - **Local main diverges after squash merges** — always create new branches from `origin/main` (`git checkout -b feat/foo origin/main`), never from local `main`.
 - **Docker pip install** — Dockerfile uses `pip install --no-cache-dir --retries 5 -r requirements.txt`. The `--retries 5` guards against transient SSL/network errors on the GitHub Actions runner (`ssl.SSLError: [SSL] record layer failure`).
@@ -540,6 +561,59 @@ Detailed specs for planned features live in `docs/specs/`:
 
 | Spec | File | Phase | Status |
 |---|---|---|---|
-| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — visual sandbox, AI suggestions, saves as Indicator or Strategy; Superchart overlay integration | 🔲 Specced |
+| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — visual sandbox, AI suggestions, saves as Indicator or Strategy; Superchart overlay integration | 🚧 PR #108 merged (backend); frontend PRs 2–5 in progress |
 | G-Optimize | `docs/specs/g-optimize.md` | 3.6 — global automated strategy discovery: random param search → backtest → RAG inject → Co-Pilot ranking | ✅ Complete (PR #102) |
 | ML Signal Engine | `docs/specs/ml-engine.md` | 5 — LightGBM model, single inference path for backtest + live, model registry | 🔲 Specced |
+
+---
+
+## Indicator Lab endpoints (`/api/lab`)
+
+`backend/routers/lab.py` — prefix `/api/lab`
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /api/lab/indicators` | None | Compute indicator series (stateless) — same response schema as analytics overlay |
+| `POST /api/lab/signals` | None | Compute signal timestamps from conditions (stateless) |
+| `GET /api/lab/indicators/saved` | JWT | List saved indicators for current user |
+| `POST /api/lab/indicators/saved` | JWT | Create saved indicator |
+| `PUT /api/lab/indicators/saved/{id}` | JWT | Update name / status / config |
+| `DELETE /api/lab/indicators/saved/{id}` | JWT | Delete |
+| `POST /api/lab/analyze` | SSE | Claude chart analysis (stub — implemented in Lab PR 4) |
+
+`POST /api/lab/indicators` request:
+```json
+{
+  "pair": "EURUSD", "timeframe": "1H",
+  "from": "2025-01-01", "to": "2025-04-01",
+  "indicators": [
+    {"type": "EMA", "params": {"period": 20}, "color": "#3b82f6"},
+    {"type": "RSI", "params": {"period": 14}}
+  ]
+}
+```
+Response schema identical to `GET /api/analytics/backtest/{id}/indicators` — frontend chart rendering is reused.
+
+`DELETE /api/lab/indicators/saved/{id}` requires `response_model=None` explicitly (FastAPI 204 assertion — `-> None` alone is insufficient in current version).
+
+---
+
+## Live Trading — Phase 4 architecture (`backend/live/`)
+
+`backend/live/oanda.py` — async OANDA v20 client (httpx):
+- `stream_prices(pairs)` — async generator yielding `{"type":"tick","pair","bid","ask","time"}` or `{"type":"heartbeat"}`
+- `place_market_order(instrument, units, sl_price, tp_price)`
+- `close_position(instrument)`, `get_open_positions()`, `get_account_summary()`
+- Constructor accepts `base_url`/`stream_url` for testing against a mock
+
+`backend/live/feed.py` — asyncio task registered in FastAPI lifespan:
+- Streams all 6 pairs from OANDA, publishes ticks to Redis `ticks:{pair}` channels
+- Always runs regardless of `LIVE_TRADING_ENABLED` — the price ticker needs it
+- Exponential backoff reconnect on failure (max 60s)
+
+`/ws/prices/{pair}` — WebSocket endpoint in `routers/ws.py`. No auth — relays `ticks:{pair}` from Redis to browser. Frontend uses `wss://{host}/ws/prices/{pair}`.
+
+OANDA instrument format: `EUR_USD` (underscore). Internal format: `EURUSD` (no separator). Conversion handled inside `oanda.py`.
+
+Practice stream URL: `https://stream-fxpractice.oanda.com`
+Practice REST URL: `https://api-fxpractice.oanda.com`
