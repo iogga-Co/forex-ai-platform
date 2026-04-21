@@ -245,6 +245,11 @@ function SuperchartPageInner() {
   const userOverlaySeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const userSubSeriesRef = useRef<ISeriesApi<"Line" | "Histogram">[]>([]);
 
+  // --- Lab Indicators overlay ---
+  const [savedLabIndicators, setSavedLabIndicators] = useState<{id:string;name:string;status:string;indicator_config:{indicators:{type:string;params:Record<string,unknown>;color?:string}[]}}[]>([]);
+  const [loadedLabIndicators, setLoadedLabIndicators] = useState<{id:string;name:string;data:{pane:string;series:{name:string;color:string;data:{time:number;value:number}[]}[]}[]}[]>([]);
+  const labSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
+
   // --- period diagnosis ---
   const [diagPeriodStart, setDiagPeriodStart] = useState("");
   const [diagPeriodEnd, setDiagPeriodEnd] = useState("");
@@ -364,6 +369,48 @@ function SuperchartPageInner() {
       })
       .catch(() => {});
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Load saved Lab indicators list + handle indicator_id URL param
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    fetchWithAuth(`${API_BASE}/api/lab/indicators/saved`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => {
+        setSavedLabIndicators(data);
+        const urlIndId = searchParams.get("indicator_id");
+        if (urlIndId) {
+          const ind = data.find((i: {id:string}) => i.id === urlIndId);
+          if (ind) loadLabIndicator(ind);
+        }
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---------------------------------------------------------------------------
+  // Render loaded Lab indicator series (dotted overlays on main chart)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const main = mainChartRef.current;
+    if (!main) return;
+    labSeriesRef.current.forEach(s => { try { main.removeSeries(s); } catch {} });
+    labSeriesRef.current = [];
+    for (const loaded of loadedLabIndicators) {
+      for (const group of loaded.data) {
+        if (group.pane !== "overlay") continue;
+        for (const series of group.series) {
+          const s = main.addLineSeries({
+            color: series.color, lineWidth: 1,
+            lineStyle: 3, // Dotted
+            priceLineVisible: false, lastValueVisible: false,
+            title: `[${loaded.name}] ${series.name}`,
+          });
+          s.setData(series.data as { time: Time; value: number }[]);
+          labSeriesRef.current.push(s);
+        }
+      }
+    }
+  }, [loadedLabIndicators]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------------------------------------------------------------------------
   // Load candles when pair / timeframe / dates change
@@ -767,6 +814,26 @@ function SuperchartPageInner() {
   // ---------------------------------------------------------------------------
   // Reset — clears localStorage and returns everything to defaults
   // ---------------------------------------------------------------------------
+  async function loadLabIndicator(ind: {id:string;name:string;indicator_config:{indicators:{type:string;params:Record<string,unknown>;color?:string}[]}}) {
+    if (loadedLabIndicators.find(l => l.id === ind.id)) {
+      setLoadedLabIndicators(prev => prev.filter(l => l.id !== ind.id));
+      return;
+    }
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/lab/indicators`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pair, timeframe, from: dateFrom, to: dateTo,
+          indicators: ind.indicator_config.indicators,
+        }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setLoadedLabIndicators(prev => [...prev, { id: ind.id, name: ind.name, data: data.indicators ?? [] }]);
+    } catch { /* non-fatal */ }
+  }
+
   function handleReset() {
     scClear();
     setPair("EURUSD");
@@ -952,8 +1019,14 @@ function SuperchartPageInner() {
             Refine
           </button>
           <button
-            onClick={handleReset}
+            onClick={() => router.push(`/lab?pair=${pair}&timeframe=${timeframe}`)}
             className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/40 transition-colors ml-1"
+          >
+            Open in Lab
+          </button>
+          <button
+            onClick={handleReset}
+            className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/40 transition-colors"
             title="Reset chart to defaults and clear saved state"
           >
             Reset
@@ -1182,6 +1255,41 @@ function SuperchartPageInner() {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+          </Section>
+
+          {/* Lab Saved Indicators */}
+          <Section title="Saved Indicators">
+            {savedLabIndicators.length === 0 ? (
+              <p className="text-[10px] text-zinc-500">No saved indicators. Build one in Indicator Lab.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {savedLabIndicators.map((ind) => {
+                  const isLoaded = loadedLabIndicators.some(l => l.id === ind.id);
+                  return (
+                    <div key={ind.id} className={[
+                      "flex items-center gap-1.5 rounded border px-2 py-1",
+                      isLoaded ? "border-blue-700 bg-blue-900/10" : "border-zinc-700",
+                    ].join(" ")}>
+                      <span className={`text-[10px] shrink-0 ${ind.status === "complete" ? "text-zinc-200" : "text-zinc-500"}`}>
+                        {ind.status === "complete" ? "●" : "○"}
+                      </span>
+                      <span className="text-[10px] text-zinc-300 flex-1 truncate" title={ind.name}>{ind.name}</span>
+                      <button
+                        onClick={() => loadLabIndicator(ind)}
+                        className={[
+                          "shrink-0 rounded border px-1.5 py-0.5 text-[10px] transition-colors",
+                          isLoaded
+                            ? "border-blue-700 text-blue-400 hover:bg-blue-900/30"
+                            : "border-zinc-600 text-zinc-400 hover:bg-zinc-700/40",
+                        ].join(" ")}
+                      >
+                        {isLoaded ? "Unload" : "Load"}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </Section>

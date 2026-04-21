@@ -745,6 +745,12 @@ function LabInner() {
                             {isLoaded ? "Unload" : "Load"}
                           </button>
                           <button
+                            onClick={() => router.push(`/superchart?indicator_id=${ind.id}`)}
+                            className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/40 transition-colors"
+                            title="Open in Superchart">
+                            SC
+                          </button>
+                          <button
                             onClick={() => deleteSaved(ind.id)}
                             disabled={deletingId===ind.id}
                             className="rounded border border-red-800 p-0.5 text-red-400 hover:bg-red-900/30 disabled:opacity-30 transition-colors">
