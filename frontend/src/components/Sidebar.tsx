@@ -67,8 +67,8 @@ export default function Sidebar() {
       {/* Footer */}
       <div className="px-3 py-3 border-t border-surface-border space-y-2">
         <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-gray-600" />
-          <span className="text-xs text-gray-500">Live trading off</span>
+          <span className="h-2 w-2 rounded-full bg-yellow-600" />
+          <span className="text-xs text-gray-500">Shadow mode</span>
         </div>
         <div className="flex items-center justify-between">
           {loggedIn ? (
