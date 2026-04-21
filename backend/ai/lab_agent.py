@@ -154,7 +154,7 @@ conditions). Be concrete and actionable. Do not repeat suggestions already prese
         if block.type == "text":
             text_parts.append(block.text)
         elif block.type == "tool_use":
-            tool_input = dict(block.input)  # type: ignore[arg-type]
+            tool_input = dict(block.input)  # type: ignore[arg-type, call-overload]
             reason = tool_input.pop("reason", "")
             label  = _make_label(block.name, tool_input, reason)
             suggestions.append({
