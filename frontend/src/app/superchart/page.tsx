@@ -405,7 +405,7 @@ function SuperchartPageInner() {
             priceLineVisible: false, lastValueVisible: false,
             title: `[${loaded.name}] ${series.name}`,
           });
-          s.setData(series.data as {time: number; value: number}[]);
+          s.setData(series.data as { time: Time; value: number }[]);
           labSeriesRef.current.push(s);
         }
       }
