@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-20 (Indicator Lab PR1, Phase 4 PR1, timeframe resampling — PRs #104–#108)
+**Last updated:** 2026-04-21 (Indicator Lab complete, Phase 4 PR1 merged — PRs #109–#113, #106)
 
 ---
 
@@ -12,9 +12,9 @@
 | **1** | Core Engine | ✅ Complete | ✅ 58 tests pass, CI green, PR #7 merged, staging live |
 | **2** | AI Intelligence | ✅ Complete | ✅ Strategy created → backtest runs → results stored. AI summary live |
 | **3** | Analytics Suite | ✅ Complete | ✅ 283 trades stored, equity curve 283 pts, all /api/analytics endpoints live |
-| **3.5** | Indicator Lab | 🚧 In progress | PR #108 merged (backend); frontend PRs 2–5 next |
+| **3.5** | Indicator Lab | ✅ Complete | ✅ PRs #108–#113 merged, staging live 2026-04-21 |
 | **3.6** | G-Optimize | ✅ Complete | ✅ 148 tests pass, PR #102 merged, staging live 2026-04-19 |
-| **4** | Live Trading | 🚧 In progress | PR #106 open (feed + price ticker) |
+| **4** | Live Trading | 🚧 In progress | PR #106 merged (feed + ticker); PR 2 (bar builder + signals) next |
 | **5** | Production Launch | 🔲 Pending | Pending |
 
 ---
@@ -819,13 +819,51 @@ Warmup for indicator overlays scales by `minutes_per_bar × 300 bars`.
 
 ---
 
+## Indicator Lab — Phase 3.5 ✅
+
+**Gate passed 2026-04-21.** PRs #108–#113 merged. Staging live.
+
+### Deliverables (5 PRs)
+
+| PR | What |
+|---|---|
+| #108 | DB migration 021 (`saved_indicators`), `routers/lab.py` — compute, signals, CRUD; sidebar nav |
+| #110 | Frontend: Builder panel, chart (main + sub-chart), live recompute (300ms debounce), signal markers |
+| #111 | Library panel (Load/Unload dotted overlays), Save as Indicator, Export as Strategy |
+| #112 | AI analysis panel — `ai/lab_agent.py` (Claude tool use), suggestion cards with Apply |
+| #113 | Superchart integration — Saved Indicators section, `indicator_id` URL param, "Open in Lab" button |
+
+### Architecture
+- **Compute endpoints** (`POST /api/lab/indicators`, `POST /api/lab/signals`) — stateless, no auth, all 7 timeframes via resample
+- **Saved indicators** — `saved_indicators` DB table; CRUD at `/api/lab/indicators/saved`
+- **AI analysis** — single Claude tool-use call; 3 tools: `add_indicator`, `set_param`, `add_condition`; Apply wires directly into builder state
+- **Superchart** — loads saved indicator config → `POST /api/lab/indicators` → dotted overlays; `indicator_id` URL param pre-loads on open
+
+### Key lessons
+- FastAPI `status_code=204` routes require explicit `response_model=None` — `-> None` annotation alone triggers an assertion
+- `block.input` from Anthropic SDK is typed as `object` — `dict(block.input)` needs `# type: ignore[arg-type, call-overload]`
+
+---
+
+## Phase 4 — PR 1 ✅
+
+**PR #106 merged 2026-04-21.** OANDA tick feed + price WebSocket + live page ticker.
+
+| File | What |
+|---|---|
+| `backend/live/oanda.py` | Async OANDA v20 client: stream_prices, place_market_order, close_position, get_open_positions |
+| `backend/live/feed.py` | Asyncio task: streams 6 pairs → Redis `ticks:{pair}`; auto-reconnect (max 60s backoff); registered in FastAPI lifespan |
+| `backend/routers/ws.py` | `/ws/prices/{pair}` — relays Redis ticks to browser WebSocket; no auth |
+| `frontend/live/page.tsx` | Price ticker strip: bid/ask/spread/flash/stale per pair; reconnects on drop |
+| Migration 020 | `sl_price`, `tp_price`, `r_multiple`, `shadow_mode` on `live_orders` |
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Phase 4 PR1 | **Merge pending** | PR #106 open — OANDA feed, price WebSocket, live page ticker |
 | Phase 4 PR2 | **Next** | Bar builder + signal engine (shadow mode) + signal log frontend |
 | Phase 4 PR3 | After PR2 | Executor + real trading.py endpoints + positions table |
-| Indicator Lab PR2 | Parallel | Frontend: Builder panel + Chart + live recompute + signal markers |
-| Indicator Lab PR3–5 | After PR2 | CRUD UI, AI analysis, Superchart integration |
+| Phase 4 PR4 | After PR3 | Tests + gate verification on staging |
 | ML Signal Engine | Phase 5 | Spec complete — `docs/specs/ml-engine.md` |
