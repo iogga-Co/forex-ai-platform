@@ -6,6 +6,21 @@ import { fetchWithAuth } from "@/lib/auth";
 import { loadSettings } from "@/lib/settings";
 
 // ---------------------------------------------------------------------------
+// Form persistence helpers
+// ---------------------------------------------------------------------------
+const OPT_FORM_KEY = "opt_form";
+
+function optFormLoad(): Partial<Record<string, string>> {
+  try { return JSON.parse(localStorage.getItem(OPT_FORM_KEY) ?? "{}"); } catch { return {}; }
+}
+function optFormSave(form: Record<string, string>) {
+  try { localStorage.setItem(OPT_FORM_KEY, JSON.stringify(form)); } catch {}
+}
+function optFormClear() {
+  try { localStorage.removeItem(OPT_FORM_KEY); } catch {}
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 interface Strategy {
@@ -223,18 +238,21 @@ function OptimizationPageInner() {
   const [confirmingIterDelete, setConfirmingIterDelete] = useState(false);
 
   const cfg = loadSettings();
-  const [form, setForm] = useState({
-    strategy_id: searchParams.get("strategy_id") ?? "",
-    pair: searchParams.get("pair") ?? cfg.default_pair,
-    timeframe: searchParams.get("timeframe") ?? cfg.default_timeframe,
-    period_start: searchParams.get("period_start") ?? cfg.default_period_start,
-    period_end: searchParams.get("period_end") ?? cfg.default_period_end,
-    system_prompt: "",
-    user_prompt: "",
-    max_iterations: String(cfg.default_max_iterations),
-    time_limit_minutes: String(cfg.default_time_limit_minutes),
-    target_sharpe: "",
-    target_win_rate: "",
+  const [form, setForm] = useState(() => {
+    const saved = optFormLoad();
+    return {
+      strategy_id:        searchParams.get("strategy_id")   ?? saved.strategy_id        ?? "",
+      pair:               searchParams.get("pair")          ?? saved.pair               ?? cfg.default_pair,
+      timeframe:          searchParams.get("timeframe")     ?? saved.timeframe          ?? cfg.default_timeframe,
+      period_start:       searchParams.get("period_start")  ?? saved.period_start       ?? cfg.default_period_start,
+      period_end:         searchParams.get("period_end")    ?? saved.period_end         ?? cfg.default_period_end,
+      system_prompt:      saved.system_prompt      ?? "",
+      user_prompt:        saved.user_prompt        ?? "",
+      max_iterations:     saved.max_iterations     ?? String(cfg.default_max_iterations),
+      time_limit_minutes: saved.time_limit_minutes ?? String(cfg.default_time_limit_minutes),
+      target_sharpe:      saved.target_sharpe      ?? "",
+      target_win_rate:    saved.target_win_rate    ?? "",
+    };
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -246,6 +264,20 @@ function OptimizationPageInner() {
 
   const esRef = useRef<EventSource | null>(null);
 
+  // Persist form to localStorage on every change
+  useEffect(() => { optFormSave(form); }, [form]);
+
+  function handleFormReset() {
+    optFormClear();
+    setForm({
+      strategy_id: "", pair: cfg.default_pair, timeframe: cfg.default_timeframe,
+      period_start: cfg.default_period_start, period_end: cfg.default_period_end,
+      system_prompt: "", user_prompt: "",
+      max_iterations: String(cfg.default_max_iterations),
+      time_limit_minutes: String(cfg.default_time_limit_minutes),
+      target_sharpe: "", target_win_rate: "",
+    });
+  }
 
   // Load strategies and runs on mount; auto-select any currently running run
   useEffect(() => {
@@ -824,6 +856,13 @@ function OptimizationPageInner() {
               className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold py-1.5 rounded transition-colors"
             >
               {submitting ? "Starting…" : "Start Optimization"}
+            </button>
+            <button
+              type="button"
+              onClick={handleFormReset}
+              className="w-full text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors mt-1"
+            >
+              Reset to defaults
             </button>
           </form>
         </div>

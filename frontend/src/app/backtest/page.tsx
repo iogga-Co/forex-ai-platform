@@ -267,7 +267,12 @@ function BacktestPageInner() {
         const saveRes = await fetchWithAuth("/api/strategies", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, strategy_ir: editedIr }),
+          body: JSON.stringify({
+            ir_json: editedIr,
+            description: name,
+            pair: strat?.pair || form.pair,
+            timeframe: strat?.timeframe || form.timeframe,
+          }),
         });
         if (!saveRes.ok) throw new Error(await saveRes.text());
         const saved = await saveRes.json();

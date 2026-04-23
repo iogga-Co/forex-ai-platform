@@ -164,7 +164,7 @@ async def list_backtest_results(
                        created_at
                 FROM backtest_runs
                 WHERE strategy_id = $1
-                  AND COALESCE(source, 'manual') != 'g_optimize'
+                  AND (COALESCE(source, 'manual') != 'g_optimize' OR passed_threshold = TRUE)
                 ORDER BY created_at DESC
                 LIMIT $2
                 """,
@@ -179,7 +179,7 @@ async def list_backtest_results(
                        sharpe, max_dd, win_rate, trade_count, total_pnl,
                        created_at
                 FROM backtest_runs
-                WHERE COALESCE(source, 'manual') != 'g_optimize'
+                WHERE (COALESCE(source, 'manual') != 'g_optimize' OR passed_threshold = TRUE)
                 ORDER BY created_at DESC
                 LIMIT $1
                 """,
