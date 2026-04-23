@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -166,11 +165,9 @@ class LiveExecutor:
             if direction == "short":
                 units = -units
 
-            # Calculate SL/TP prices (approximate; refined in PR4 with live ATR)
-            sl_dist = atr_value * sl_mult
+            # SL/TP distances kept for PR4 where live ATR will set exact prices
             tp_cfg  = (ir.get("exit_conditions") or {}).get("take_profit", {})
-            tp_mult = float(tp_cfg.get("multiplier", 3.0))
-            tp_dist = atr_value * tp_mult
+            _ = float(tp_cfg.get("multiplier", 3.0))  # tp_mult — used in PR4
 
             # Insert live_order row (status=pending)
             order_id = await self._insert_order(
