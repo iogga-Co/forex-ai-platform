@@ -12,23 +12,26 @@ from core.config import settings
 from core.redis_bridge import subscribe_and_forward
 from core.websocket import manager
 from live.engine import run_engine
+from live.executor import LiveExecutor, set_executor
 from live.feed import run_feed
 from routers import analytics, auth, backtest, candles, copilot, diagnosis, g_optimize, health, lab, news, optimization, strategy, trading, ws
 from routers import settings as settings_router
 
 logger = logging.getLogger(__name__)
 
-_redis_bridge_task: asyncio.Task | None = None
+_redis_bridge_task:  asyncio.Task | None = None
 _redis_bridge_stop = asyncio.Event()
-_feed_task:   asyncio.Task | None = None
-_feed_stop:   asyncio.Event = asyncio.Event()
-_engine_task: asyncio.Task | None = None
-_engine_stop: asyncio.Event = asyncio.Event()
+_feed_task:          asyncio.Task | None = None
+_feed_stop:          asyncio.Event = asyncio.Event()
+_engine_task:        asyncio.Task | None = None
+_engine_stop:        asyncio.Event = asyncio.Event()
+_executor_task:      asyncio.Task | None = None
+_executor_stop:      asyncio.Event = asyncio.Event()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    global _redis_bridge_task, _redis_bridge_stop, _feed_task, _feed_stop, _engine_task, _engine_stop
+    global _redis_bridge_task, _redis_bridge_stop, _feed_task, _feed_stop, _engine_task, _engine_stop, _executor_task, _executor_stop
 
     # --- Startup ---
     logger.info("Initialising database connection pool")
@@ -50,9 +53,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     pool = await core_db.get_pool()
     _engine_task = asyncio.create_task(run_engine(_engine_stop, pool), name="signal-engine")
 
+    if settings.live_trading_enabled:
+        logger.info("LIVE_TRADING_ENABLED=true — starting order executor")
+        _executor_stop = asyncio.Event()
+        executor = LiveExecutor(pool)
+        set_executor(executor)
+        _executor_task = asyncio.create_task(
+            executor.run(_executor_stop), name="live-executor"
+        )
+    else:
+        logger.info("LIVE_TRADING_ENABLED=false — executor NOT started (shadow mode)")
+
     yield
 
     # --- Shutdown ---
+    if _executor_task and not _executor_task.done():
+        logger.info("Stopping order executor")
+        _executor_stop.set()
+        _executor_task.cancel()
+        try:
+            await _executor_task
+        except asyncio.CancelledError:
+            pass
+    set_executor(None)
+
     logger.info("Stopping signal engine")
     _engine_stop.set()
     if _engine_task and not _engine_task.done():
