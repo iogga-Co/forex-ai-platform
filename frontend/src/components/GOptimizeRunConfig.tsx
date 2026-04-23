@@ -5,6 +5,20 @@ import { fetchWithAuth } from "@/lib/auth";
 import type { GOptimizeRun } from "@/lib/gOptimizeTypes";
 
 // ---------------------------------------------------------------------------
+// Form persistence helpers
+// ---------------------------------------------------------------------------
+const GOPT_KEY = "gopt_form";
+function goptLoad(): Partial<FormState> {
+  try { return JSON.parse(localStorage.getItem(GOPT_KEY) ?? "{}"); } catch { return {}; }
+}
+function goptSave(f: FormState) {
+  try { localStorage.setItem(GOPT_KEY, JSON.stringify(f)); } catch {}
+}
+function goptClear() {
+  try { localStorage.removeItem(GOPT_KEY); } catch {}
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 const ALL_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"];
@@ -318,9 +332,20 @@ interface Props {
 }
 
 export default function GOptimizeRunConfig({ onCreated, onCancel }: Props) {
-  const [form, setForm] = useState<FormState>({ ...DEFAULT_FORM, entry_conditions: DEFAULT_FORM.entry_conditions.map((c) => ({ ...c })) });
+  const [form, setForm] = useState<FormState>(() => {
+    const saved = goptLoad();
+    if (saved && saved.pairs && saved.n_configs !== undefined) return saved as FormState;
+    return { ...DEFAULT_FORM, entry_conditions: DEFAULT_FORM.entry_conditions.map((c) => ({ ...c })) };
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { goptSave(form); }, [form]);
+
+  function handleReset() {
+    goptClear();
+    setForm({ ...DEFAULT_FORM, entry_conditions: DEFAULT_FORM.entry_conditions.map((c) => ({ ...c })) });
+  }
 
   function set<K extends keyof FormState>(key: K, val: FormState[K]) {
     setForm((f) => ({ ...f, [key]: val }));
@@ -733,6 +758,13 @@ export default function GOptimizeRunConfig({ onCreated, onCancel }: Props) {
               ({form.n_configs.toLocaleString()} configs × {form.pairs.length} pair{form.pairs.length !== 1 ? "s" : ""})
             </span>
           </span>
+          <button
+            type="button"
+            onClick={handleReset}
+            className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            Reset
+          </button>
           <button
             type="button"
             onClick={onCancel}

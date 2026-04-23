@@ -65,6 +65,24 @@ function defaultFrom() {
 }
 function defaultTo() { return new Date().toISOString().slice(0,10); }
 
+// ---------------------------------------------------------------------------
+// Lab state persistence
+// ---------------------------------------------------------------------------
+const LAB_KEY = "lab_state";
+interface PersistedLab {
+  pair: string; timeframe: string; dateFrom: string; dateTo: string;
+  indicators: LabIndicator[]; conditions: LabCondition[];
+}
+function labLoad(): Partial<PersistedLab> {
+  try { return JSON.parse(localStorage.getItem(LAB_KEY) ?? "{}"); } catch { return {}; }
+}
+function labSave(s: PersistedLab) {
+  try { localStorage.setItem(LAB_KEY, JSON.stringify(s)); } catch {}
+}
+function labClear() {
+  try { localStorage.removeItem(LAB_KEY); } catch {}
+}
+
 function makeChart(el: HTMLDivElement, h: number, hideTime = false): IChartApi {
   return createChart(el, {
     width: el.clientWidth, height: h,
@@ -85,11 +103,11 @@ function LabInner() {
   const router       = useRouter();
   const searchParams = useSearchParams();
 
-  // Controls
-  const [pair,      setPair]      = useState(() => searchParams.get("pair")      ?? "EURUSD");
-  const [timeframe, setTimeframe] = useState(() => searchParams.get("timeframe") ?? "1H");
-  const [dateFrom,  setDateFrom]  = useState(defaultFrom);
-  const [dateTo,    setDateTo]    = useState(defaultTo);
+  // Controls — restored from localStorage; URL params take priority
+  const [pair,      setPair]      = useState(() => searchParams.get("pair")      ?? labLoad().pair      ?? "EURUSD");
+  const [timeframe, setTimeframe] = useState(() => searchParams.get("timeframe") ?? labLoad().timeframe ?? "1H");
+  const [dateFrom,  setDateFrom]  = useState(() => labLoad().dateFrom ?? defaultFrom());
+  const [dateTo,    setDateTo]    = useState(() => labLoad().dateTo   ?? defaultTo());
 
   // Data
   const [candles,        setCandles]        = useState<Candle[]>([]);
@@ -98,9 +116,9 @@ function LabInner() {
   const [signals,        setSignals]        = useState<number[]>([]);
   const [computing,      setComputing]      = useState(false);
 
-  // Builder
-  const [indicators, setIndicators] = useState<LabIndicator[]>([]);
-  const [conditions, setConditions] = useState<LabCondition[]>([]);
+  // Builder — restored from localStorage
+  const [indicators, setIndicators] = useState<LabIndicator[]>(() => labLoad().indicators ?? []);
+  const [conditions, setConditions] = useState<LabCondition[]>(() => labLoad().conditions ?? []);
   const [newIndType, setNewIndType] = useState<IndType>("EMA");
   const [newCondInd, setNewCondInd] = useState("RSI");
   const [newCondOp,  setNewCondOp]  = useState(">");
@@ -253,6 +271,19 @@ function LabInner() {
     } catch { /* non-fatal */ }
     finally { setComputing(false); }
   }, []);
+
+  // Persist builder state to localStorage
+  useEffect(() => {
+    labSave({ pair, timeframe, dateFrom, dateTo, indicators, conditions });
+  }, [pair, timeframe, dateFrom, dateTo, indicators, conditions]);
+
+  function handleLabReset() {
+    labClear();
+    setPair("EURUSD"); setTimeframe("1H");
+    setDateFrom(defaultFrom()); setDateTo(defaultTo());
+    setIndicators([]); setConditions([]);
+    setIndicatorData([]); setSignals([]);
+  }
 
   function scheduleRecompute(inds: LabIndicator[], conds: LabCondition[]) {
     if (recomputeTimer.current) clearTimeout(recomputeTimer.current);
@@ -526,6 +557,13 @@ function LabInner() {
         {candles.length > 0 && !loadingCandles && (
           <span className="text-[10px] text-zinc-600">{candles.length.toLocaleString()} bars</span>
         )}
+        <button
+          onClick={handleLabReset}
+          className="ml-auto rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/40 transition-colors"
+          title="Reset builder to defaults and clear saved state"
+        >
+          Reset
+        </button>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
