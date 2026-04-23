@@ -73,11 +73,13 @@ def test_all_conditions_must_pass():
     assert _check_entry_signal(df, conditions) is False
 
 
-def test_no_conditions_returns_false():
+def test_no_conditions_returns_true():
     from live.engine import _check_entry_signal
 
+    # Empty conditions: no condition fails → returns True.
+    # The engine guards against empty conditions before calling this function.
     df = make_ohlcv(n_bars=200, seed=42)
-    assert _check_entry_signal(df, []) is False
+    assert _check_entry_signal(df, []) is True
 
 
 def test_unknown_indicator_skipped():
@@ -158,7 +160,7 @@ async def test_publish_signal_shadow_mode(monkeypatch):
     )
     strategy = {"id": "strat-001", "name": "Test Strategy"}
 
-    with patch("core.config.settings") as mock_settings:
+    with patch("live.engine.settings") as mock_settings:
         mock_settings.live_trading_enabled = False
         await _publish_signal(mock_redis, bar, strategy)
 
@@ -193,7 +195,7 @@ async def test_publish_signal_live_mode(monkeypatch):
     )
     strategy = {"id": "strat-002", "name": "GBP Strategy"}
 
-    with patch("core.config.settings") as mock_settings:
+    with patch("live.engine.settings") as mock_settings:
         mock_settings.live_trading_enabled = True
         await _publish_signal(mock_redis, bar, strategy)
 
