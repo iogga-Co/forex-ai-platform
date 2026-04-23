@@ -8,9 +8,7 @@ calls are made.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 
-import httpx
 import pytest
 
 from live.oanda import OandaClient, _from_oanda, _to_oanda

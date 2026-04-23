@@ -36,7 +36,6 @@ def test_price_above_ema_signal():
     from live.engine import _check_entry_signal
 
     # Build a DataFrame where close is clearly above EMA(5)
-    import numpy as np
     ts = pd.date_range("2026-01-01", periods=100, freq="1h", tz="UTC")
     close = pd.Series([1.0] * 95 + [2.0] * 5, index=ts)
     df = pd.DataFrame({"open": close, "high": close, "low": close, "close": close})

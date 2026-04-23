@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from live.bars import BarBuilder, OHLCVBar
+from live.bars import BarBuilder
 
 
 def _dt(h: int, m: int = 0, s: int = 0) -> datetime:

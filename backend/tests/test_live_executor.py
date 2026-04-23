@@ -4,10 +4,12 @@ Unit tests for live/executor.py — order lifecycle and kill switch.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+
+from live.executor import LiveExecutor, get_executor, set_executor
 
 
 # ---------------------------------------------------------------------------
@@ -23,8 +25,7 @@ def _make_pool_mock(conn: AsyncMock) -> MagicMock:
     return pool
 
 
-def _make_executor(pool) -> "LiveExecutor":
-    from live.executor import LiveExecutor
+def _make_executor(pool) -> LiveExecutor:
     executor = LiveExecutor.__new__(LiveExecutor)
     executor._pool  = pool
     executor._oanda = AsyncMock()
@@ -83,7 +84,6 @@ def test_compute_units_zero_atr_returns_fallback():
 
 @pytest.mark.asyncio
 async def test_insert_order_returns_uuid():
-    from live.executor import LiveExecutor
 
     order_id = uuid4()
     conn = AsyncMock()
@@ -106,7 +106,6 @@ async def test_insert_order_returns_uuid():
 
 @pytest.mark.asyncio
 async def test_update_order_filled():
-    from live.executor import LiveExecutor
 
     conn = AsyncMock()
     pool = _make_pool_mock(conn)
@@ -121,7 +120,6 @@ async def test_update_order_filled():
 
 @pytest.mark.asyncio
 async def test_update_order_rejected():
-    from live.executor import LiveExecutor
 
     conn = AsyncMock()
     pool = _make_pool_mock(conn)
@@ -140,7 +138,6 @@ async def test_update_order_rejected():
 
 @pytest.mark.asyncio
 async def test_kill_switch_closes_positions():
-    from live.executor import LiveExecutor
 
     conn = AsyncMock()
     conn.execute = AsyncMock()
@@ -165,7 +162,6 @@ async def test_kill_switch_closes_positions():
 
 @pytest.mark.asyncio
 async def test_kill_switch_no_positions():
-    from live.executor import LiveExecutor
 
     conn = AsyncMock()
     pool = _make_pool_mock(conn)
@@ -181,7 +177,6 @@ async def test_kill_switch_no_positions():
 @pytest.mark.asyncio
 async def test_kill_switch_partial_failure():
     """kill_switch should continue even if one close_position fails."""
-    from live.executor import LiveExecutor
 
     conn = AsyncMock()
     pool = _make_pool_mock(conn)
@@ -213,7 +208,6 @@ async def test_kill_switch_partial_failure():
 # ---------------------------------------------------------------------------
 
 def test_get_set_executor():
-    from live.executor import get_executor, set_executor, LiveExecutor
 
     assert get_executor() is None or True  # may be None or set from previous test
 
@@ -231,8 +225,6 @@ def test_get_set_executor():
 
 @pytest.mark.asyncio
 async def test_reconcile_marks_closed_when_position_gone():
-    from live.executor import LiveExecutor
-    from uuid import uuid4
 
     order_id = uuid4()
     conn = AsyncMock()
