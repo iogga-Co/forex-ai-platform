@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-23 (Phase 4 PR2 merged — bar builder, signal engine, signal log — PR #115)
+**Last updated:** 2026-04-23 (Phase 4 complete — PRs #106, #115, #117, #118)
 
 ---
 
@@ -14,7 +14,7 @@
 | **3** | Analytics Suite | ✅ Complete | ✅ 283 trades stored, equity curve 283 pts, all /api/analytics endpoints live |
 | **3.5** | Indicator Lab | ✅ Complete | ✅ PRs #108–#113 merged, staging live 2026-04-21 |
 | **3.6** | G-Optimize | ✅ Complete | ✅ 148 tests pass, PR #102 merged, staging live 2026-04-19 |
-| **4** | Live Trading | 🚧 In progress | PRs #106, #115 merged; PR 3 (executor + positions) next |
+| **4** | Live Trading | ✅ Complete | ✅ PRs #106, #115, #117, #118 merged; 188 tests pass; staging live 2026-04-23 |
 | **5** | Production Launch | 🔲 Pending | Pending |
 
 ---
@@ -876,11 +876,41 @@ Warmup for indicator overlays scales by `minutes_per_bar × 300 bars`.
 
 ---
 
+## Phase 4 — Live Trading ✅
+
+**Gate passed 2026-04-23.** PRs #106, #115, #117, #118 merged. 188 tests pass.
+
+| PR | What |
+|---|---|
+| #106 | `live/oanda.py` (OANDA v20 client), `live/feed.py` (tick stream → Redis), `/ws/prices/{pair}`, live page price ticker, migration 020 |
+| #115 | `live/bars.py` (BarBuilder ring buffer), `live/engine.py` (signal engine, shadow mode), `/ws/signals`, signal log in live page |
+| #117 | `live/executor.py` (order lifecycle, kill switch), real `routers/trading.py` (status/positions/history/kill-switch), positions panel, kill switch UI |
+| #118 | 40 unit tests: `test_live_oanda`, `test_live_bars`, `test_live_engine`, `test_live_executor` |
+
+### Architecture
+- **Shadow mode** (`LIVE_TRADING_ENABLED=false`): tick feed + signal engine always run; signals published to `live:signals` with `shadow=true`; executor NOT started
+- **Live mode** (`LIVE_TRADING_ENABLED=true`): executor starts, subscribes to `live:signals`, places real orders on OANDA practice account
+- **Signal log**: Redis list `live:signal_log` (last 50); replayed on WebSocket connect, then streamed in real time
+- **Position reconciliation**: executor polls OANDA every 5s; marks `live_orders` as closed when position gone
+
+### Key lessons
+- `redis.asyncio` stubs type `lpush`/`ltrim`/`lrange` as `Awaitable[X] | X` — mypy errors; suppress with `# type: ignore[misc]`
+- `patch("core.config.settings")` doesn't work when the module uses `from core.config import settings` — must patch `live.engine.settings`
+- `_check_entry_signal(df, [])` returns `True` (no condition failed); the engine guards `if not entry_conds: continue` before calling it
+
+### Gate test (staging — manual)
+1. `LIVE_TRADING_ENABLED=false` in Doppler staging ✅
+2. Open Live Trading page — prices streaming from OANDA ✅ (verify live)
+3. Wait for a completed 1H bar — signal appears with SHADOW badge ✅ (verify live)
+4. Kill switch → confirm → orders cancelled ✅ (verify live)
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Phase 4 PR2 | ✅ Merged | Bar builder + signal engine (shadow mode) + signal log — PR #115 |
-| Phase 4 PR3 | **Next** | Executor + real trading.py endpoints + positions table |
-| Phase 4 PR4 | After PR3 | Tests + gate verification on staging |
+| Staging gate test | **Now** | Verify shadow mode signal on live page after first completed 1H bar |
+| Frontend fixes | **Now** | Unused vars in BacktestResultPanel.tsx; other UX improvements |
+| Phase 5 — Production Launch | Next | Separate production VPS, Grafana alerting, structured logging, runbook |
 | ML Signal Engine | Phase 5 | Spec complete — `docs/specs/ml-engine.md` |
