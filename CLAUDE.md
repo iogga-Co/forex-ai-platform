@@ -22,7 +22,7 @@ AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (
 | 3 | Analytics Suite | ✅ Complete |
 | 3.5 | Indicator Lab | ✅ Complete — PRs #108–#113 merged |
 | 3.6 | G-Optimize | ✅ Complete — PR #102 |
-| 4 | Live Trading | 🚧 In progress — PR #106 merged (feed + price ticker); PR 2 next |
+| 4 | Live Trading | ✅ Complete — PRs #106, #115, #117, #118 merged |
 | 5 | Production Launch | 🔲 Pending |
 
 ---
