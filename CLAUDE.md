@@ -40,7 +40,8 @@ forex-ai-platform/
 │   ├── ai/               # model_router.py (provider dispatch), claude/openai/gemini clients,
 │   │                     #   optimization_agent.py, g_optimize_agent.py, Voyage AI retrieval,
 │   │                     #   strategy_diagnosis.py, trade_analysis.py, period_diagnosis.py
-│   ├── live/             # Phase 4 live trading: oanda.py (OANDA client), feed.py (tick stream)
+│   ├── live/             # Phase 4 live trading: oanda.py (OANDA v20 client), feed.py (tick stream),
+│   │                     #   bars.py (BarBuilder ring buffer), engine.py (signal engine, shadow mode)
 │   ├── core/             # Config, DB pool, auth (JWT)
 │   ├── data/             # OHLCV ingest pipeline, quality checks
 │   └── scripts/          # backfill.py — historical data loader; seed_demo.py — demo data seed
@@ -617,7 +618,22 @@ Response schema identical to `GET /api/analytics/backtest/{id}/indicators` — f
 - Always runs regardless of `LIVE_TRADING_ENABLED` — the price ticker needs it
 - Exponential backoff reconnect on failure (max 60s)
 
-`/ws/prices/{pair}` — WebSocket endpoint in `routers/ws.py`. No auth — relays `ticks:{pair}` from Redis to browser. Frontend uses `wss://{host}/ws/prices/{pair}`.
+`/ws/prices/{pair}` — WebSocket endpoint in `routers/ws.py`. No auth — relays `ticks:{pair}` from Redis to browser.
+
+`backend/live/bars.py` — `BarBuilder(pair, timeframe)`:
+- `update(bid, ask, tick_time)` — feeds a tick; returns a completed `OHLCVBar` when a bar boundary is crossed (first tick of the next bar closes the previous)
+- Ring buffer `deque(maxlen=500)` per pair+TF stores completed bars in memory
+- `to_dataframe()` → float64 DataFrame for indicator computation
+- Completed bars also persisted to `ohlcv_candles` (ON CONFLICT DO NOTHING)
+
+`backend/live/engine.py` — `run_engine(stop_event, pool)`:
+- One asyncio worker per pair; subscribes to Redis `ticks:{pair}`, drives BarBuilders for 1m and 1H
+- On each completed bar: evaluates all active strategies' entry conditions using `engine/indicators.py`
+- `LIVE_TRADING_ENABLED=false` → signal published to Redis `live:signals` with `shadow=true`, no orders placed
+- Capped log in Redis list `live:signal_log` (last 50) for page-load history replay
+- Strategies reloaded from DB every 5 min
+
+`/ws/signals` — WebSocket endpoint. On connect: replays `live:signal_log` history, then streams `live:signals` pub/sub. No auth.
 
 OANDA instrument format: `EUR_USD` (underscore). Internal format: `EURUSD` (no separator). Conversion handled inside `oanda.py`.
 
