@@ -647,6 +647,14 @@ function BacktestPageInner() {
                         <div className="text-[10px] opacity-70">{r.total_pnl >= 0 ? "+" : ""}{(r.total_pnl / 1000).toFixed(2)}%</div>
                       </div>
                     </div>
+                    {(() => {
+                      const strat = strategies.find((s) => s.id === r.strategy_id);
+                      return strat ? (
+                        <div className="text-[10px] text-zinc-400 mt-0.5 pl-5 truncate" title={strat.description}>
+                          {strat.description}
+                        </div>
+                      ) : null;
+                    })()}
                     <div className="flex items-center gap-3 mt-1 text-xs pl-5">
                       <span className="text-gray-300">Sh <span className="font-medium">{fmt(r.sharpe)}</span></span>
                       <span className="text-gray-300">WR <span className="font-medium">{fmtPct(r.win_rate)}</span></span>
