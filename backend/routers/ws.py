@@ -90,7 +90,7 @@ async def signal_feed(websocket: WebSocket) -> None:
         r = aioredis.from_url(settings.redis_url, decode_responses=True)
 
         # Replay history (stored newest-first, so reverse for chronological order)
-        history = await r.lrange("live:signal_log", 0, -1)
+        history = await r.lrange("live:signal_log", 0, -1)  # type: ignore[misc]
         for item in reversed(history):
             await websocket.send_text(item)
 

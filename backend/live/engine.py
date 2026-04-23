@@ -201,8 +201,8 @@ async def _publish_signal(
     payload = json.dumps(signal)
     await r.publish(SIGNAL_CHANNEL, payload)
     # Keep a capped log for page-load history
-    await r.lpush(SIGNAL_LOG_KEY, payload)
-    await r.ltrim(SIGNAL_LOG_KEY, 0, SIGNAL_LOG_MAX - 1)
+    await r.lpush(SIGNAL_LOG_KEY, payload)       # type: ignore[misc]
+    await r.ltrim(SIGNAL_LOG_KEY, 0, SIGNAL_LOG_MAX - 1)  # type: ignore[misc]
     logger.info(
         "Signal [%s] %s %s strategy=%s shadow=%s",
         bar.timeframe, bar.pair, "long", strategy["name"], shadow,
