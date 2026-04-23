@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchWithAuth } from "@/lib/auth";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -221,31 +224,128 @@ function useSignalLog(maxEntries = 50): { signals: SignalEntry[]; connected: boo
 }
 
 // ---------------------------------------------------------------------------
+// Trading status + positions
+// ---------------------------------------------------------------------------
+interface TradingStatus {
+  enabled: boolean;
+  oanda_environment: string;
+  open_positions: number;
+  account_balance: number | null;
+  shadow_mode: boolean;
+}
+
+interface Position {
+  id: string;
+  strategy_id: string;
+  pair: string | null;
+  direction: string;
+  size: number;
+  entry_price: number | null;
+  opened_at: string;
+  shadow_mode: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 export default function LiveTradingPage() {
   const { signals, connected: sigConnected } = useSignalLog();
+  const [status,       setStatus]       = useState<TradingStatus | null>(null);
+  const [positions,    setPositions]    = useState<Position[]>([]);
+  const [killing,      setKilling]      = useState(false);
+  const [killConfirm,  setKillConfirm]  = useState(false);
+  const [killMsg,      setKillMsg]      = useState("");
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/trading/status`);
+      if (res.ok) setStatus(await res.json());
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const loadPositions = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/trading/positions`);
+      if (res.ok) setPositions(await res.json());
+    } catch { /* non-fatal */ }
+  }, []);
+
+  useEffect(() => {
+    loadStatus();
+    loadPositions();
+    const t = setInterval(() => { loadStatus(); loadPositions(); }, 10_000);
+    return () => clearInterval(t);
+  }, [loadStatus, loadPositions]);
+
+  async function handleKillSwitch() {
+    setKilling(true); setKillMsg("");
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/trading/kill-switch`, { method: "POST" });
+      const data = await res.json();
+      setKillMsg(data.message ?? "Done");
+      setKillConfirm(false);
+      loadStatus(); loadPositions();
+    } catch (e) {
+      setKillMsg(e instanceof Error ? e.message : "Kill switch failed");
+    } finally { setKilling(false); }
+  }
 
   function formatTime(ts: string): string {
     try { return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
     catch { return ts; }
   }
 
+  const shadowMode = status?.shadow_mode !== false;
+
   return (
     <div className="flex flex-col h-full bg-zinc-950 text-zinc-200 p-4 gap-4 overflow-auto">
 
       {/* Header */}
-      <div className="flex items-center justify-between shrink-0">
+      <div className="flex items-center justify-between shrink-0 flex-wrap gap-2">
         <div>
           <h1 className="text-sm font-semibold text-zinc-100">Live Trading</h1>
           <p className="text-[11px] text-zinc-500 mt-0.5">
-            Real-time OANDA prices · Shadow mode — signal logging only
+            OANDA {status?.oanda_environment ?? "practice"} ·{" "}
+            {status?.account_balance != null && (
+              <span className="text-zinc-400">Balance: ${status.account_balance.toFixed(2)} · </span>
+            )}
+            {status?.open_positions ?? 0} open position{status?.open_positions !== 1 ? "s" : ""}
           </p>
         </div>
-        <span className="rounded border border-yellow-700 px-2 py-0.5 text-[10px] text-yellow-500 font-medium">
-          SHADOW MODE
-        </span>
+        <div className="flex items-center gap-2">
+          {shadowMode ? (
+            <span className="rounded border border-yellow-700 px-2 py-0.5 text-[10px] text-yellow-500 font-medium">
+              SHADOW MODE
+            </span>
+          ) : (
+            <span className="rounded border border-green-700 px-2 py-0.5 text-[10px] text-green-400 font-medium">
+              LIVE (PRACTICE)
+            </span>
+          )}
+          {/* Kill switch */}
+          {!killConfirm ? (
+            <button
+              onClick={() => setKillConfirm(true)}
+              className="rounded border border-red-800 px-2 py-0.5 text-[10px] text-red-400 hover:bg-red-900/30 transition-colors"
+            >
+              Kill Switch
+            </button>
+          ) : (
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-red-400">Confirm?</span>
+              <button onClick={handleKillSwitch} disabled={killing}
+                className="rounded border border-red-700 px-2 py-0.5 text-[10px] text-red-300 hover:bg-red-900/40 disabled:opacity-40 transition-colors">
+                {killing ? "…" : "Yes"}
+              </button>
+              <button onClick={() => { setKillConfirm(false); setKillMsg(""); }}
+                className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/40 transition-colors">
+                No
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+      {killMsg && <p className="text-[10px] text-yellow-400 shrink-0">{killMsg}</p>}
 
       {/* Price ticker strip */}
       <div className="shrink-0">
@@ -319,9 +419,40 @@ export default function LiveTradingPage() {
           )}
         </div>
 
-        {/* Open positions placeholder — PR 3 */}
-        <div className="w-64 shrink-0 rounded border border-zinc-800 flex items-center justify-center">
-          <p className="text-[11px] text-zinc-600 text-center px-4">Open positions<br/>— Phase 4 PR 3</p>
+        {/* Open positions */}
+        <div className="w-64 shrink-0 flex flex-col rounded border border-zinc-800 overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 shrink-0">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+              Open Positions
+            </span>
+            <span className="text-[10px] text-zinc-600">{positions.length}</span>
+          </div>
+          {positions.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center p-4">
+              <p className="text-[11px] text-zinc-600 text-center">No open positions</p>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto divide-y divide-zinc-800/60">
+              {positions.map(p => (
+                <div key={p.id} className="px-3 py-2 space-y-0.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-zinc-200">{p.pair ?? "—"}</span>
+                    <span className={p.direction === "long" ? "text-[10px] text-green-400" : "text-[10px] text-red-400"}>
+                      {p.direction === "long" ? "▲ Long" : "▼ Short"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                    <span>{p.size.toLocaleString()} units</span>
+                    {p.entry_price != null && <span>@ {p.entry_price.toFixed(5)}</span>}
+                  </div>
+                  <div className="text-[10px] text-zinc-600">{formatTime(p.opened_at)}</div>
+                  {p.shadow_mode && (
+                    <span className="text-[9px] text-yellow-600">SHADOW</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
       </div>
