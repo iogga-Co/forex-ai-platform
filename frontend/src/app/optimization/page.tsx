@@ -930,6 +930,14 @@ function OptimizationPageInner() {
                   {run.status}
                 </span>
               </div>
+              {run.initial_strategy_id && (() => {
+                const strat = strategies.find((s) => s.id === run.initial_strategy_id);
+                return strat ? (
+                  <div className="text-[10px] text-zinc-400 mt-0.5 pl-5 truncate" title={strat.description}>
+                    {strat.description}
+                  </div>
+                ) : null;
+              })()}
               <div className="text-xs text-zinc-500 mt-0.5 pl-5">
                 {fmtDate(run.created_at)} · {run.current_iteration}/{run.max_iterations} iter
               </div>
