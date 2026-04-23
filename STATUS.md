@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-21 (Indicator Lab complete, Phase 4 PR1 merged — PRs #109–#113, #106)
+**Last updated:** 2026-04-23 (Phase 4 PR2 merged — bar builder, signal engine, signal log — PR #115)
 
 ---
 
@@ -14,7 +14,7 @@
 | **3** | Analytics Suite | ✅ Complete | ✅ 283 trades stored, equity curve 283 pts, all /api/analytics endpoints live |
 | **3.5** | Indicator Lab | ✅ Complete | ✅ PRs #108–#113 merged, staging live 2026-04-21 |
 | **3.6** | G-Optimize | ✅ Complete | ✅ 148 tests pass, PR #102 merged, staging live 2026-04-19 |
-| **4** | Live Trading | 🚧 In progress | PR #106 merged (feed + ticker); PR 2 (bar builder + signals) next |
+| **4** | Live Trading | 🚧 In progress | PRs #106, #115 merged; PR 3 (executor + positions) next |
 | **5** | Production Launch | 🔲 Pending | Pending |
 
 ---
@@ -859,11 +859,28 @@ Warmup for indicator overlays scales by `minutes_per_bar × 300 bars`.
 
 ---
 
+## Phase 4 — PR 2 ✅
+
+**PR #115 merged 2026-04-23.**
+
+| File | What |
+|---|---|
+| `backend/live/bars.py` | `BarBuilder(pair, tf)` — tick aggregation → OHLCV bars; `deque(maxlen=500)` ring buffer; `to_dataframe()` for indicators |
+| `backend/live/engine.py` | `run_engine(stop_event, pool)` — 6 asyncio workers (one per pair); evaluates all active strategies on each 1m/1H bar; publishes signals to Redis `live:signals` + capped log `live:signal_log`; shadow mode when `LIVE_TRADING_ENABLED=false` |
+| `backend/routers/ws.py` | `/ws/signals` — replays history on connect, streams new signals in real time |
+| `frontend/live/page.tsx` | Signal log table with SHADOW/LIVE badges, direction arrows, strategy name, reconnecting WS |
+
+### Key lessons
+- `redis.asyncio` stubs type `lpush`/`ltrim`/`lrange` as `Awaitable[X] | X` — mypy errors on await; suppress with `# type: ignore[misc]`
+- `timezone` imported alongside `datetime` but only `datetime` used in engine — ruff F401
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Phase 4 PR2 | **Next** | Bar builder + signal engine (shadow mode) + signal log frontend |
-| Phase 4 PR3 | After PR2 | Executor + real trading.py endpoints + positions table |
+| Phase 4 PR2 | ✅ Merged | Bar builder + signal engine (shadow mode) + signal log — PR #115 |
+| Phase 4 PR3 | **Next** | Executor + real trading.py endpoints + positions table |
 | Phase 4 PR4 | After PR3 | Tests + gate verification on staging |
 | ML Signal Engine | Phase 5 | Spec complete — `docs/specs/ml-engine.md` |
