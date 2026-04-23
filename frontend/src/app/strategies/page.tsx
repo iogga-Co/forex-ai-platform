@@ -331,7 +331,7 @@ export default function StrategiesPage() {
     setActive((prev) => [s, ...prev]);
   }
 
-  const selectedStrategy = active.find((s) => s.id === selectedStrategyId) ?? null;
+  const selectedStrategy = [...active, ...deleted].find((s) => s.id === selectedStrategyId) ?? null;
 
   return (
     <div className="flex h-full overflow-hidden -m-1">
