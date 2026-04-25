@@ -561,11 +561,9 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
   const checkedCount = visibleIds.filter((id) => checkedTradeIds.has(id)).length;
   const allChecked = visibleIds.length > 0 && checkedCount === visibleIds.length;
   const someChecked = checkedCount > 0 && checkedCount < visibleIds.length;
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = someChecked;
-    }
-  }); // no deps — run after every render so indeterminate stays in sync
+  if (selectAllRef.current) {
+    selectAllRef.current.indeterminate = someChecked;
+  }
 
   function toggleAll() {
     if (allChecked) {
