@@ -255,6 +255,8 @@ export default function LiveTradingPage() {
   const [killing,      setKilling]      = useState(false);
   const [killConfirm,  setKillConfirm]  = useState(false);
   const [killMsg,      setKillMsg]      = useState("");
+  const [totpCode,     setTotpCode]     = useState("");
+  const [totpError,    setTotpError]    = useState("");
 
   const loadStatus = useCallback(async () => {
     try {
@@ -278,12 +280,31 @@ export default function LiveTradingPage() {
   }, [loadStatus, loadPositions]);
 
   async function handleKillSwitch() {
-    setKilling(true); setKillMsg("");
+    setKilling(true); setKillMsg(""); setTotpError("");
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/trading/kill-switch`, { method: "POST" });
+      // Step 1: verify TOTP and get short-lived mfa_token
+      const verifyRes = await fetchWithAuth(`${API_BASE}/api/auth/mfa/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: totpCode }),
+      });
+      if (!verifyRes.ok) {
+        const err = await verifyRes.json().catch(() => ({}));
+        setTotpError(err.detail ?? "Invalid TOTP code");
+        setKilling(false);
+        return;
+      }
+      const { mfa_token } = await verifyRes.json() as { mfa_token: string };
+
+      // Step 2: execute kill switch with MFA token
+      const res = await fetchWithAuth(`${API_BASE}/api/trading/kill-switch`, {
+        method: "POST",
+        headers: { "X-MFA-Token": mfa_token },
+      });
       const data = await res.json();
       setKillMsg(data.message ?? "Done");
       setKillConfirm(false);
+      setTotpCode("");
       loadStatus(); loadPositions();
     } catch (e) {
       setKillMsg(e instanceof Error ? e.message : "Kill switch failed");
@@ -325,21 +346,36 @@ export default function LiveTradingPage() {
           {/* Kill switch */}
           {!killConfirm ? (
             <button
-              onClick={() => setKillConfirm(true)}
+              onClick={() => { setKillConfirm(true); setTotpCode(""); setTotpError(""); }}
               className="rounded border border-red-800 px-2 py-0.5 text-[10px] text-red-400 hover:bg-red-900/30 transition-colors"
             >
               Kill Switch
             </button>
           ) : (
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] text-red-400">Confirm?</span>
-              <button onClick={handleKillSwitch} disabled={killing}
-                className="rounded border border-red-700 px-2 py-0.5 text-[10px] text-red-300 hover:bg-red-900/40 disabled:opacity-40 transition-colors">
-                {killing ? "…" : "Yes"}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-red-400">MFA code:</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={totpCode}
+                onChange={(e) => { setTotpCode(e.target.value.replace(/\D/g, "")); setTotpError(""); }}
+                placeholder="000000"
+                className="w-16 rounded border border-red-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-100 text-center font-mono focus:outline-none focus:border-red-600"
+              />
+              {totpError && <span className="text-[10px] text-red-400">{totpError}</span>}
+              <button
+                onClick={handleKillSwitch}
+                disabled={killing || totpCode.length !== 6}
+                className="rounded border border-red-700 px-2 py-0.5 text-[10px] text-red-300 hover:bg-red-900/40 disabled:opacity-40 transition-colors"
+              >
+                {killing ? "…" : "Confirm"}
               </button>
-              <button onClick={() => { setKillConfirm(false); setKillMsg(""); }}
-                className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/40 transition-colors">
-                No
+              <button
+                onClick={() => { setKillConfirm(false); setKillMsg(""); setTotpCode(""); setTotpError(""); }}
+                className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/40 transition-colors"
+              >
+                Cancel
               </button>
             </div>
           )}
