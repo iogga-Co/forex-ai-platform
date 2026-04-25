@@ -339,8 +339,8 @@ def make_trades(run_id: str, pair: str, period_start: str, period_end: str,
     """Generate realistic trades for a backtest run."""
     rng = random.Random(run_id)
     base = BASE_PRICES[pair]
-    is_jpy = "JPY" in pair
-    pip_val = 0.01 if is_jpy else 0.0001
+    from core.instruments import get_pip_size
+    pip_val = get_pip_size(pair)
 
     start_dt = datetime.fromisoformat(period_start).replace(tzinfo=timezone.utc)
     end_dt   = datetime.fromisoformat(period_end).replace(tzinfo=timezone.utc)

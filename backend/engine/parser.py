@@ -25,6 +25,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from core.instruments import get_pip_size
 from engine import indicators as ind
 from engine.filters import combined_filter_mask
 from engine.sir import IndicatorCondition, StrategyIR
@@ -93,7 +94,7 @@ class SIRParser:
             frac = (atr_vals * mult) / self._df["close"].replace(0, np.nan)
             return frac.fillna(0.01)
         if ts.type == "fixed_pips":
-            pip_size = 0.01 if "JPY" in self._symbol else 0.0001
+            pip_size = get_pip_size(self._symbol)
             pips = ts.pips or 20.0
             frac = (pips * pip_size) / self._df["close"].replace(0, np.nan)
             return frac.fillna(0.01)
@@ -295,7 +296,7 @@ class SIRParser:
             )
 
         if stop_cfg.type == "fixed_pips":
-            pip_size = 0.01 if "JPY" in self._symbol else 0.0001
+            pip_size = get_pip_size(self._symbol)
             pips = stop_cfg.pips or 20.0
             frac = (pips * pip_size) / self._df["close"].replace(0, np.nan)
             return frac.fillna(0.01)

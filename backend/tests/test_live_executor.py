@@ -133,6 +133,59 @@ async def test_update_order_rejected():
 
 
 # ---------------------------------------------------------------------------
+# ATR abort in _handle_signal
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_handle_signal_aborts_when_atr_missing():
+    """Signal with no atr_value must not place an order."""
+    conn = AsyncMock()
+    pool = _make_pool_mock(conn)
+    executor = _make_executor(pool)
+
+    ir = {
+        "exit_conditions": {"stop_loss": {"type": "atr", "period": 14, "multiplier": 1.5}},
+        "position_sizing": {"risk_per_trade_pct": 1.0},
+    }
+    executor._fetch_strategy_ir = AsyncMock(return_value=ir)
+    executor._oanda.get_account_summary = AsyncMock(return_value={"balance": "10000"})
+
+    signal = {
+        "pair": "EURUSD", "strategy_id": str(uuid4()),
+        "direction": "long",
+        # atr_value intentionally absent
+    }
+    await executor._handle_signal(signal)
+
+    executor._oanda.create_market_order.assert_not_called()
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_signal_aborts_when_atr_zero():
+    """Signal with atr_value=0 must not place an order."""
+    conn = AsyncMock()
+    pool = _make_pool_mock(conn)
+    executor = _make_executor(pool)
+
+    ir = {
+        "exit_conditions": {"stop_loss": {"type": "atr", "period": 14, "multiplier": 1.5}},
+        "position_sizing": {"risk_per_trade_pct": 1.0},
+    }
+    executor._fetch_strategy_ir = AsyncMock(return_value=ir)
+    executor._oanda.get_account_summary = AsyncMock(return_value={"balance": "10000"})
+
+    signal = {
+        "pair": "EURUSD", "strategy_id": str(uuid4()),
+        "direction": "long", "atr_value": 0.0,
+    }
+    await executor._handle_signal(signal)
+
+    executor._oanda.create_market_order.assert_not_called()
+    conn.execute.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # kill_switch
 # ---------------------------------------------------------------------------
 
@@ -217,6 +270,63 @@ def test_get_set_executor():
 
     set_executor(None)
     assert get_executor() is None
+
+
+# ---------------------------------------------------------------------------
+# _reconcile_on_startup
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_reconcile_on_startup_closes_stale_orders():
+    """Startup reconciliation must close filled orders not open on OANDA."""
+    order_id = uuid4()
+    conn = AsyncMock()
+    conn.fetch = AsyncMock(return_value=[{"id": order_id, "pair": "EURUSD"}])
+    conn.execute = AsyncMock()
+    pool = _make_pool_mock(conn)
+    executor = _make_executor(pool)
+
+    # OANDA reports no open positions
+    executor._oanda.get_open_positions = AsyncMock(return_value=[])
+
+    await executor._reconcile_on_startup()
+
+    conn.execute.assert_called_once()
+    sql = conn.execute.call_args[0][0]
+    assert "closed" in sql
+
+
+@pytest.mark.asyncio
+async def test_reconcile_on_startup_skips_still_open_orders():
+    """Startup reconciliation must leave orders open when OANDA confirms them."""
+    order_id = uuid4()
+    conn = AsyncMock()
+    conn.fetch = AsyncMock(return_value=[{"id": order_id, "pair": "EURUSD"}])
+    conn.execute = AsyncMock()
+    pool = _make_pool_mock(conn)
+    executor = _make_executor(pool)
+
+    # OANDA reports EURUSD still open
+    executor._oanda.get_open_positions = AsyncMock(return_value=[
+        {"instrument": "EUR_USD"}
+    ])
+
+    await executor._reconcile_on_startup()
+
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_on_startup_handles_oanda_error():
+    """Startup reconciliation failure must not crash the executor."""
+    conn = AsyncMock()
+    pool = _make_pool_mock(conn)
+    executor = _make_executor(pool)
+
+    executor._oanda.get_open_positions = AsyncMock(side_effect=Exception("OANDA unreachable"))
+
+    # Should not raise
+    await executor._reconcile_on_startup()
 
 
 # ---------------------------------------------------------------------------

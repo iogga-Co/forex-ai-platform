@@ -12,6 +12,34 @@ AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (
 
 ---
 
+## Behavioral guidelines
+
+### Think before coding
+
+- State assumptions explicitly before implementing. If uncertain, ask — don't guess silently.
+- If multiple interpretations exist, present them rather than picking one without saying so.
+- If a simpler approach exists, say so and push back when warranted.
+
+### Simplicity first
+
+- Minimum code that solves the problem. Nothing speculative.
+- No abstractions for single-use code. No "flexibility" that wasn't requested.
+- If you write 200 lines and it could be 50, rewrite it.
+
+### Surgical changes
+
+- Touch only what the task requires. Don't "improve" adjacent code, comments, or formatting.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it — don't delete it.
+- Remove imports/variables/functions that *your* changes made unused; leave pre-existing dead code alone.
+
+### Goal-driven execution
+
+- Transform vague tasks into verifiable goals before starting (e.g. "fix the bug" → "write a test that reproduces it, then make it pass").
+- For multi-step tasks, state a brief numbered plan with a verify step for each item.
+
+---
+
 ## Phase status
 
 | Phase | Name | Status |

@@ -187,6 +187,7 @@ async def _publish_signal(
     r: aioredis.Redis,
     bar: OHLCVBar,
     strategy: dict,
+    atr_value: float,
 ) -> None:
     shadow = not settings.live_trading_enabled
     signal = {
@@ -197,6 +198,7 @@ async def _publish_signal(
         "strategy_id":   strategy["id"],
         "strategy_name": strategy["name"],
         "shadow":        shadow,
+        "atr_value":     atr_value,
     }
     payload = json.dumps(signal)
     await r.publish(SIGNAL_CHANNEL, payload)
@@ -293,7 +295,14 @@ async def _pair_worker(
                     if not entry_conds:
                         continue
                     if _check_entry_signal(df, entry_conds):
-                        asyncio.create_task(_publish_signal(r, completed, strategy))
+                        sl_period = int(
+                            (strategy["ir"].get("exit_conditions") or {})
+                            .get("stop_loss", {})
+                            .get("period", 14)
+                        )
+                        atr_series = calc_atr(df["high"], df["low"], df["close"], sl_period)
+                        atr_val = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
+                        asyncio.create_task(_publish_signal(r, completed, strategy, atr_val))
 
     except asyncio.CancelledError:
         pass
