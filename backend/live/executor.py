@@ -31,8 +31,12 @@ from live.oanda import OandaClient
 
 logger = logging.getLogger(__name__)
 
-SIGNAL_CHANNEL  = "live:signals"
-POLL_INTERVAL_S = 5.0    # seconds between open-position polls
+SIGNAL_CHANNEL     = "live:signals"
+CMD_CHANNEL        = "live:commands"
+CMD_RESULT_PREFIX  = "live:cmd_results:"
+BALANCE_KEY        = "live:account_balance"
+BALANCE_TTL        = 30   # seconds
+POLL_INTERVAL_S    = 5.0  # seconds between open-position polls
 
 
 # ---------------------------------------------------------------------------
@@ -96,10 +100,10 @@ class LiveExecutor:
         try:
             r = aioredis.from_url(settings.redis_url, decode_responses=True)
             pubsub = r.pubsub()
-            await pubsub.subscribe(SIGNAL_CHANNEL)
+            await pubsub.subscribe(SIGNAL_CHANNEL, CMD_CHANNEL)
 
             poll_task = asyncio.create_task(
-                self._poll_positions(stop_event), name="executor-poll"
+                self._poll_positions(stop_event, r), name="executor-poll"
             )
 
             while not stop_event.is_set():
@@ -109,15 +113,18 @@ class LiveExecutor:
                 if msg is None:
                     continue
                 try:
-                    signal = json.loads(msg["data"])
+                    data = json.loads(msg["data"])
                 except Exception:
                     continue
 
-                # Only act on non-shadow signals
-                if signal.get("shadow", True):
+                if msg["channel"] == CMD_CHANNEL:
+                    asyncio.create_task(self._handle_command(data, r))
                     continue
 
-                asyncio.create_task(self._handle_signal(signal))
+                # live:signals — only act on non-shadow signals
+                if data.get("shadow", True):
+                    continue
+                asyncio.create_task(self._handle_signal(data))
 
             poll_task.cancel()
             await asyncio.gather(poll_task, return_exceptions=True)
@@ -133,6 +140,26 @@ class LiveExecutor:
                 except Exception:
                     pass
         logger.info("LiveExecutor stopped")
+
+    # ------------------------------------------------------------------
+    # Redis command channel (kill-switch from web API)
+    # ------------------------------------------------------------------
+
+    async def _handle_command(self, cmd: dict, r: aioredis.Redis) -> None:
+        request_id = cmd.get("request_id", "unknown")
+        result: dict
+        if cmd.get("cmd") == "kill_switch":
+            try:
+                closed = await self.kill_switch()
+                result = {"ok": True, "closed": closed}
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)}
+        else:
+            result = {"ok": False, "error": f"Unknown command: {cmd.get('cmd')}"}
+
+        result_key = CMD_RESULT_PREFIX + request_id
+        await r.lpush(result_key, json.dumps(result))
+        await r.expire(result_key, 30)
 
     # ------------------------------------------------------------------
     # Signal handling
@@ -220,8 +247,12 @@ class LiveExecutor:
     # Open-position polling
     # ------------------------------------------------------------------
 
-    async def _poll_positions(self, stop_event: asyncio.Event) -> None:
-        """Poll OANDA every POLL_INTERVAL_S for filled/closed positions."""
+    async def _poll_positions(self, stop_event: asyncio.Event, r: aioredis.Redis | None = None) -> None:
+        """Poll OANDA every POLL_INTERVAL_S for filled/closed positions.
+
+        Also caches the account balance to Redis so the web API can read it
+        without needing a direct reference to this executor instance.
+        """
         while not stop_event.is_set():
             await asyncio.sleep(POLL_INTERVAL_S)
             try:
@@ -230,8 +261,15 @@ class LiveExecutor:
                     p["instrument"].replace("_", "")
                     for p in positions
                 }
-                # Close out any live_orders rows whose position is gone
                 await self._reconcile_closed(open_pairs)
+
+                if r is not None:
+                    try:
+                        account = await self._oanda.get_account_summary()
+                        balance = float(account.get("balance", 0) or 0)
+                        await r.setex(BALANCE_KEY, BALANCE_TTL, str(balance))
+                    except Exception:
+                        pass  # non-fatal — balance cache miss handled by status endpoint
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -364,16 +402,3 @@ class LiveExecutor:
             )
 
 
-# ---------------------------------------------------------------------------
-# Module-level singleton (set by main.py lifespan)
-# ---------------------------------------------------------------------------
-_executor: LiveExecutor | None = None
-
-
-def get_executor() -> LiveExecutor | None:
-    return _executor
-
-
-def set_executor(ex: LiveExecutor | None) -> None:
-    global _executor
-    _executor = ex

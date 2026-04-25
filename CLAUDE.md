@@ -100,6 +100,9 @@ doppler run -- docker compose restart fastapi
 # Restart only Celery (required after tasks/ changes)
 doppler run -- docker compose restart celery
 
+# Restart trading service (required after live/ code changes)
+doppler run -- docker compose restart trading-service
+
 # Production/staging (baked images, no bind mounts)
 doppler run -- docker compose up
 ```
