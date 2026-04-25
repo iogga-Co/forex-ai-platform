@@ -162,12 +162,13 @@ async def test_publish_signal_shadow_mode(monkeypatch):
 
     with patch("live.engine.settings") as mock_settings:
         mock_settings.live_trading_enabled = False
-        await _publish_signal(mock_redis, bar, strategy)
+        await _publish_signal(mock_redis, bar, strategy, atr_value=0.0012)
 
     assert len(published) == 1
     assert published[0]["shadow"] is True
     assert published[0]["pair"] == "EURUSD"
     assert published[0]["strategy_id"] == "strat-001"
+    assert published[0]["atr_value"] == 0.0012
 
 
 @pytest.mark.asyncio
@@ -197,7 +198,8 @@ async def test_publish_signal_live_mode(monkeypatch):
 
     with patch("live.engine.settings") as mock_settings:
         mock_settings.live_trading_enabled = True
-        await _publish_signal(mock_redis, bar, strategy)
+        await _publish_signal(mock_redis, bar, strategy, atr_value=0.0015)
 
     assert published[0]["shadow"] is False
     assert published[0]["pair"] == "GBPUSD"
+    assert published[0]["atr_value"] == 0.0015

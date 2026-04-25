@@ -26,6 +26,7 @@ from uuid import UUID
 import redis.asyncio as aioredis
 
 from core.config import settings
+from core.instruments import get_pip_size
 from live.oanda import OandaClient
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ class LiveExecutor:
 
     async def run(self, stop_event: asyncio.Event) -> None:
         logger.info("LiveExecutor started (env=%s)", settings.oanda_environment)
+        await self._reconcile_on_startup()
         r: aioredis.Redis | None = None
         try:
             r = aioredis.from_url(settings.redis_url, decode_responses=True)
@@ -159,7 +161,15 @@ class LiveExecutor:
             sizing    = ir.get("position_sizing") or {}
             sl_mult   = float(sl_cfg.get("multiplier", 1.5))
             risk_pct  = float(sizing.get("risk_per_trade_pct", 1.0))
-            atr_value = 0.0005  # fallback if ATR not available live
+            atr_value = signal.get("atr_value")
+            if atr_value is None or float(atr_value) <= 0:
+                logger.critical(
+                    "Executor: aborting order for %s — ATR missing or zero in signal (atr_value=%s). "
+                    "No order placed.",
+                    pair, atr_value,
+                )
+                return
+            atr_value = float(atr_value)
 
             units = _compute_units(atr_value, sl_mult, risk_pct, balance, pair)
             if direction == "short":
@@ -226,6 +236,20 @@ class LiveExecutor:
                 break
             except Exception as exc:
                 logger.debug("Position poll error: %s", exc)
+
+    async def _reconcile_on_startup(self) -> None:
+        """Sync stale filled orders against OANDA on startup.
+
+        If the platform was offline when a SL/TP hit, DB rows stay 'filled'
+        forever. This corrects them before the main loop begins.
+        """
+        try:
+            positions = await self._oanda.get_open_positions()
+            open_pairs = {p["instrument"].replace("_", "") for p in positions}
+            await self._reconcile_closed(open_pairs)
+            logger.info("Startup reconciliation complete (OANDA open pairs: %s)", open_pairs or "none")
+        except Exception as exc:
+            logger.error("Startup reconciliation failed: %s", exc)
 
     async def _reconcile_closed(self, open_pairs: set[str]) -> None:
         """Mark live_orders as closed when OANDA no longer shows the position."""
