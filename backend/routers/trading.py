@@ -9,19 +9,24 @@ POST /api/trading/kill-switch — close all positions + cancel all orders
 
 from __future__ import annotations
 
+import json
 import logging
+import uuid
 from typing import Annotated
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from core.auth import TokenData, get_current_user, require_mfa
 from core.config import settings
 from core.db import get_pool
-from live.executor import get_executor
+from live.executor import BALANCE_KEY, CMD_CHANNEL, CMD_RESULT_PREFIX
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/trading", tags=["Live Trading"])
+
+CMD_TIMEOUT_S = 10.0  # seconds to wait for trading-service to respond
 
 
 def _f(v: object) -> float | None:
@@ -54,19 +59,21 @@ async def get_trading_status(
             "SELECT COUNT(*) FROM live_orders WHERE status = 'filled'"
         ) or 0
 
-    executor = get_executor()
-    if executor is not None:
-        try:
-            account = await executor._oanda.get_account_summary()
-            account_balance = float(account.get("balance", 0) or 0)
-        except Exception as exc:
-            logger.debug("Could not fetch OANDA account summary: %s", exc)
+    # Balance is cached by the trading-service executor every poll cycle
+    try:
+        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+        raw = await r.get(BALANCE_KEY)
+        await r.aclose()
+        if raw is not None:
+            account_balance = float(raw)
+    except Exception as exc:
+        logger.debug("Could not read cached account balance: %s", exc)
 
     return TradingStatusResponse(
         enabled=settings.live_trading_enabled,
         oanda_environment=settings.oanda_environment,
         open_positions=int(open_positions),
-        daily_pnl=0.0,  # computed in PR4 from closed orders today
+        daily_pnl=0.0,
         account_balance=account_balance,
         shadow_mode=not settings.live_trading_enabled,
     )
@@ -185,16 +192,16 @@ async def get_order_history(
 async def kill_switch(
     _: Annotated[TokenData, Depends(get_current_user)],
     _mfa: Annotated[None, Depends(require_mfa)],
+    pool=Depends(get_pool),
 ) -> dict:
     """
     Emergency stop — closes all open OANDA positions and marks all
     live_orders as cancelled.  Works in both live and shadow mode.
+
+    In live mode, delegates to the trading-service via Redis live:commands.
+    In shadow mode, cancels DB rows directly (no OANDA calls needed).
     """
-    executor = get_executor()
-    if executor is None:
-        # Shadow mode: just cancel DB rows, no OANDA calls needed
-        from core.db import get_pool as _get_pool
-        pool = await _get_pool()
+    if not settings.live_trading_enabled:
         async with pool.acquire() as conn:
             await conn.execute(
                 """
@@ -205,12 +212,29 @@ async def kill_switch(
             )
         return {"closed": 0, "message": "Shadow mode — DB orders cancelled"}
 
+    # Delegate to trading-service via Redis command channel
+    request_id = str(uuid.uuid4())
+    result_key = CMD_RESULT_PREFIX + request_id
     try:
-        closed = await executor.kill_switch()
+        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+        await r.publish(CMD_CHANNEL, json.dumps({"cmd": "kill_switch", "request_id": request_id}))
+        raw = await r.blpop(result_key, timeout=int(CMD_TIMEOUT_S))
+        await r.aclose()
     except Exception as exc:
-        logger.error("Kill switch failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.error("Kill switch Redis error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Kill switch communication failed")
 
+    if raw is None:
+        raise HTTPException(
+            status_code=504,
+            detail="Trading service did not respond — kill switch timed out",
+        )
+
+    result = json.loads(raw[1])
+    if not result.get("ok"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Kill switch failed"))
+
+    closed = result.get("closed", 0)
     logger.info("Kill switch executed: %d positions closed", closed)
     return {"closed": closed, "message": f"Kill switch executed — {closed} position(s) closed"}
 

@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from live.executor import LiveExecutor, get_executor, set_executor
+from live.executor import LiveExecutor
 
 
 # ---------------------------------------------------------------------------
@@ -256,20 +256,6 @@ async def test_kill_switch_partial_failure():
     conn.execute.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# Singleton helpers
-# ---------------------------------------------------------------------------
-
-def test_get_set_executor():
-
-    assert get_executor() is None or True  # may be None or set from previous test
-
-    mock_executor = MagicMock(spec=LiveExecutor)
-    set_executor(mock_executor)
-    assert get_executor() is mock_executor
-
-    set_executor(None)
-    assert get_executor() is None
 
 
 # ---------------------------------------------------------------------------

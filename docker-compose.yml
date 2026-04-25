@@ -131,6 +131,40 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
+  # Trading Service — OANDA tick feed, signal engine, and order executor.
+  # Decoupled from FastAPI so web API errors cannot affect live trading.
+  # Communicates with the web layer exclusively via Redis pub/sub channels.
+  # ---------------------------------------------------------------------------
+  trading-service:
+    build: ./backend
+    command: python trading_service.py
+    expose: []
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - VOYAGE_API_KEY=${VOYAGE_API_KEY}
+      - OANDA_API_KEY=${OANDA_API_KEY}
+      - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
+      - OANDA_ENVIRONMENT=${OANDA_ENVIRONMENT}
+      - LIVE_TRADING_ENABLED=false
+      - OPERATOR_PASSWORD=${OPERATOR_PASSWORD}
+      - NUMBA_CACHE_DIR=/tmp/numba_cache
+    depends_on:
+      - timescaledb
+      - redis
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis, os; r=redis.from_url(os.environ['REDIS_URL']); exit(0 if r.exists('live:heartbeat') else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - internal
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
   # Next.js — Frontend SSR application.
   # Never exposed directly. Nginx proxies all public requests here.
   # ---------------------------------------------------------------------------
