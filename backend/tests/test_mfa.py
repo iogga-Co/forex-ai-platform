@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pyotp
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.auth import create_mfa_token, require_mfa
 from fastapi import HTTPException

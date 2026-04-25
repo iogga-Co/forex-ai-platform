@@ -26,7 +26,6 @@ from uuid import UUID
 import redis.asyncio as aioredis
 
 from core.config import settings
-from core.instruments import get_pip_size
 from live.oanda import OandaClient
 
 logger = logging.getLogger(__name__)
