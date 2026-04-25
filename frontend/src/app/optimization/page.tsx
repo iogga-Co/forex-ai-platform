@@ -2,6 +2,7 @@
 
 import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/auth";
 import { loadSettings } from "@/lib/settings";
 
@@ -262,7 +263,8 @@ function OptimizationPageInner() {
   const [editedIr, setEditedIr] = useState<Record<string, unknown> | null>(null);
   const [irDirty, setIrDirty] = useState(false);
 
-  const esRef = useRef<EventSource | null>(null);
+  const esRef    = useRef<EventSource | null>(null);
+  const esBackoff = useRef(1000); // ms — doubles on each onerror, resets on onopen
 
   // Persist form to localStorage on every change
   useEffect(() => { optFormSave(form); }, [form]);
@@ -421,6 +423,7 @@ function OptimizationPageInner() {
         setLiveEvents((prev) => [...prev, data]);
         es.close();
         esRef.current = null;
+        toast.success("Optimization complete");
         // Refresh run status
         loadRuns().then(() => {
           fetchWithAuth(`${API_BASE}/api/optimization/runs/${runId}`)
@@ -433,9 +436,19 @@ function OptimizationPageInner() {
       }
     });
 
+    es.onopen = () => {
+      esBackoff.current = 1000; // reset on successful connection
+    };
+
     es.addEventListener("error", () => {
       es.close();
       esRef.current = null;
+      // Reconnect with exponential backoff (capped at 30s)
+      const delay = esBackoff.current;
+      esBackoff.current = Math.min(delay * 2, 30_000);
+      setTimeout(() => {
+        if (esRef.current === null) startSse(runId);
+      }, delay);
     });
   }
 

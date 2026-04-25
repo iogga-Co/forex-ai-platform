@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Toaster } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
+import DensityProvider from "@/components/DensityProvider";
 import Sidebar from "@/components/Sidebar";
 import "./globals.css";
 
@@ -28,6 +30,8 @@ export default function RootLayout({
           <Sidebar />
           <main className="flex-1 overflow-y-auto p-1">{children}</main>
         </AuthGuard>
+        <DensityProvider />
+        <Toaster theme="dark" position="bottom-right" richColors />
       </body>
     </html>
   );

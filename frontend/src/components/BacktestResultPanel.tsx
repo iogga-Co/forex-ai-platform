@@ -11,10 +11,9 @@ import {
 } from "lightweight-charts";
 import {
   Area,
-  AreaChart,
   CartesianGrid,
+  ComposedChart,
   Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -150,10 +149,23 @@ function tradeDurationMin(t: Trade): number {
 // ---------------------------------------------------------------------------
 // MetricCard
 // ---------------------------------------------------------------------------
-function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+const METRIC_TIPS: Record<string, string> = {
+  "Sharpe":        "Return per unit of risk (annualised). >1 good, >2 excellent.",
+  "Sortino":       "Like Sharpe but only penalises downside volatility.",
+  "Max Drawdown":  "Largest peak-to-trough equity decline. Lower is better.",
+  "Win Rate":      "Percentage of trades that closed at a profit.",
+  "Avg R-Multiple": "Average profit/loss expressed as a multiple of the initial risk.",
+  "Profit Factor": "Gross profit ÷ gross loss. >1.5 indicates a positive edge.",
+};
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  const tip = METRIC_TIPS[label];
   return (
-    <div className="bg-gray-800 rounded-lg px-2 py-1.5 flex items-center gap-1.5">
-      <p className="text-[10px] text-gray-400 whitespace-nowrap">{label}</p>
+    <div
+      title={tip}
+      className={`bg-gray-800 rounded-lg px-2 py-1.5 flex items-center gap-1.5${tip ? " cursor-help" : ""}`}
+    >
+      <p className="text-[10px] text-gray-400 whitespace-nowrap">{label}{tip ? " ⓘ" : ""}</p>
       <p className="text-sm font-semibold text-gray-100 leading-none">{value}</p>
     </div>
   );
@@ -549,9 +561,11 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
   const checkedCount = visibleIds.filter((id) => checkedTradeIds.has(id)).length;
   const allChecked = visibleIds.length > 0 && checkedCount === visibleIds.length;
   const someChecked = checkedCount > 0 && checkedCount < visibleIds.length;
-  if (selectAllRef.current) {
-    selectAllRef.current.indeterminate = someChecked;
-  }
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someChecked;
+    }
+  }); // no deps — run after every render so indeterminate stays in sync
 
   function toggleAll() {
     if (allChecked) {
@@ -587,8 +601,10 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
   }
 
   const token = getAccessToken() ?? "";
-  const ddPoints = equityCurve.map((p) => ({
+  // Merge equity + drawdown into one dataset for the dual-axis chart
+  const equityDdData = equityCurve.map((p) => ({
     time: p.time,
+    equity: p.equity,
     drawdown_pct: +(p.drawdown * 100).toFixed(2),
   }));
   const oscillatorGroups = indicatorData.filter((g) => g.pane === "oscillator");
@@ -892,12 +908,22 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
         </div>
       )}
 
-      {/* Equity curve */}
-      {equityCurve.length > 0 && (
+      {/* Equity + Drawdown — dual-axis combined chart */}
+      {equityDdData.length > 0 && (
         <div className="bg-gray-800 rounded-lg p-2">
-          <h3 className="text-xs font-medium text-gray-300 mb-1.5">Equity Curve</h3>
-          <ResponsiveContainer width="100%" height={130}>
-            <LineChart data={equityCurve}>
+          <div className="flex items-center justify-between mb-1.5">
+            <h3 className="text-xs font-medium text-gray-300">Equity &amp; Drawdown</h3>
+            <div className="flex items-center gap-3 text-[10px] text-gray-500">
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-0.5 rounded bg-blue-500" /> Equity
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-0.5 rounded bg-red-500" /> Drawdown %
+              </span>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={160}>
+            <ComposedChart data={equityDdData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
               <XAxis
                 dataKey="time"
@@ -905,45 +931,34 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
                 tick={{ fill: "#9ca3af", fontSize: 10 }}
                 interval="preserveStartEnd"
               />
+              {/* Left axis — equity */}
               <YAxis
+                yAxisId="equity"
                 tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                 tick={{ fill: "#9ca3af", fontSize: 10 }}
                 width={52}
               />
+              {/* Right axis — drawdown % */}
+              <YAxis
+                yAxisId="dd"
+                orientation="right"
+                tickFormatter={(v) => `${v.toFixed(0)}%`}
+                tick={{ fill: "#9ca3af", fontSize: 10 }}
+                width={36}
+              />
               <Tooltip
                 contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 6 }}
                 labelStyle={{ color: "#9ca3af", fontSize: 11 }}
-                itemStyle={{ color: "#60a5fa" }}
-                formatter={(v: number) => [`$${v.toLocaleString()}`, "Equity"]}
                 labelFormatter={(v) => fmtDateTime(v)}
+                formatter={(v: number, name: string) =>
+                  name === "equity"
+                    ? [`$${v.toLocaleString()}`, "Equity"]
+                    : [`${v.toFixed(2)}%`, "Drawdown"]
+                }
               />
-              <Line type="monotone" dataKey="equity" stroke="#3b82f6" dot={false} strokeWidth={1.5} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* Drawdown */}
-      {ddPoints.length > 0 && (
-        <div className="bg-gray-800 rounded-lg p-2">
-          <h3 className="text-xs font-medium text-gray-300 mb-1.5">Drawdown (%)</h3>
-          <ResponsiveContainer width="100%" height={80}>
-            <AreaChart data={ddPoints}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis
-                dataKey="time"
-                tickFormatter={(v) => new Date(v).toLocaleDateString("en-GB", { month: "short", year: "2-digit" })}
-                tick={{ fill: "#9ca3af", fontSize: 10 }}
-                interval="preserveStartEnd"
-              />
-              <YAxis tickFormatter={(v) => `${v.toFixed(1)}%`} tick={{ fill: "#9ca3af", fontSize: 10 }} width={48} />
-              <Tooltip
-                contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 6 }}
-                formatter={(v: number) => [`${v.toFixed(2)}%`, "Drawdown"]}
-                labelFormatter={(v) => fmtDateTime(v)}
-              />
-              <Area type="monotone" dataKey="drawdown_pct" stroke="#ef4444" fill="#ef44441a" dot={false} strokeWidth={1.5} />
-            </AreaChart>
+              <Line yAxisId="equity" type="monotone" dataKey="equity" stroke="#3b82f6" dot={false} strokeWidth={1.5} />
+              <Area  yAxisId="dd"     type="monotone" dataKey="drawdown_pct" stroke="#ef4444" fill="#ef44441a" dot={false} strokeWidth={1} />
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       )}

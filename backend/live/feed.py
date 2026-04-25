@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 import redis.asyncio as aioredis
 
@@ -23,8 +24,9 @@ from live.oanda import OandaClient
 
 logger = logging.getLogger(__name__)
 
-FEED_PAIRS   = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"]
-TICK_CHANNEL = "ticks:{pair}"
+FEED_PAIRS            = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"]
+TICK_CHANNEL          = "ticks:{pair}"
+HEARTBEAT_STALE_S     = 30.0   # trigger reconnect if no heartbeat within this window
 
 
 async def run_feed(stop_event: asyncio.Event) -> None:
@@ -70,6 +72,7 @@ async def _stream_loop(stop_event: asyncio.Event) -> None:
         environment=settings.oanda_environment,
     )
     r = aioredis.from_url(settings.redis_url, decode_responses=True)
+    last_heartbeat_at = time.monotonic()
 
     try:
         logger.info("OANDA feed connected — streaming %s", FEED_PAIRS)
@@ -77,14 +80,20 @@ async def _stream_loop(stop_event: asyncio.Event) -> None:
             if stop_event.is_set():
                 break
 
+            # Staleness check — OANDA sends heartbeats every ~10s
+            if time.monotonic() - last_heartbeat_at > HEARTBEAT_STALE_S:
+                raise RuntimeError(
+                    f"No OANDA heartbeat for >{HEARTBEAT_STALE_S:.0f}s — reconnecting"
+                )
+
             payload = json.dumps(msg)
 
             if msg["type"] == "tick":
                 await r.publish(TICK_CHANNEL.format(pair=msg["pair"]), payload)
 
             elif msg["type"] == "heartbeat":
-                # Broadcast the OANDA heartbeat to every pair channel so
-                # all frontend subscribers can detect a live feed.
+                last_heartbeat_at = time.monotonic()
+                # Broadcast to every pair channel so frontend can detect a live feed
                 for pair in FEED_PAIRS:
                     await r.publish(TICK_CHANNEL.format(pair=pair), payload)
 
