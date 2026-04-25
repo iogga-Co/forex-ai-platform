@@ -157,8 +157,8 @@ class LiveExecutor:
             result = {"ok": False, "error": f"Unknown command: {cmd.get('cmd')}"}
 
         result_key = CMD_RESULT_PREFIX + request_id
-        await r.lpush(result_key, json.dumps(result))
-        await r.expire(result_key, 30)
+        await r.lpush(result_key, json.dumps(result))  # type: ignore[misc]
+        await r.expire(result_key, 30)  # type: ignore[misc]
 
     # ------------------------------------------------------------------
     # Signal handling
