@@ -298,7 +298,7 @@ jobs:
               docker exec forex-ai-platform-timescaledb-1 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "/docker-entrypoint-initdb.d/$(basename $f)" 2>&1 | grep -Ev "already exists|^$" || true
             done'
             # Recreate backend first so fastapi is available before nginx reloads
-            doppler run -- docker compose up -d --remove-orphans --force-recreate fastapi celery celery-g-optimize
+            doppler run -- docker compose up -d --remove-orphans --force-recreate fastapi celery celery-g-optimize trading-service
             # Brief wait for fastapi to register in Docker DNS
             sleep 5
             doppler run -- docker compose up -d --force-recreate nextjs
