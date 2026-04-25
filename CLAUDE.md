@@ -51,7 +51,11 @@ AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (
 | 3.5 | Indicator Lab | ✅ Complete — PRs #108–#113 merged |
 | 3.6 | G-Optimize | ✅ Complete — PR #102 |
 | 4 | Live Trading | ✅ Complete — PRs #106, #115, #117, #118 merged |
-| 5 | Production Launch | 🔲 Pending |
+| 5.0 | Live Trading Hardening | ✅ Complete — ATR abort, reconciliation, pip registry, MFA |
+| 5.1 | Microservice Decomposition | ✅ Complete — trading-service container |
+| 5.2 | UX & Stability | ✅ Complete — toasts, dual-axis chart, density toggle, SSE backoff |
+| 5.3 | Advanced Execution | 🔲 Pending |
+| 5.4 | RAG Evaluation | 🔲 Pending |
 
 ---
 
@@ -69,8 +73,9 @@ forex-ai-platform/
 │   │                     #   optimization_agent.py, g_optimize_agent.py, Voyage AI retrieval,
 │   │                     #   strategy_diagnosis.py, trade_analysis.py, period_diagnosis.py
 │   ├── live/             # Phase 4 live trading: oanda.py (OANDA v20 client), feed.py (tick stream),
-│   │                     #   bars.py (BarBuilder ring buffer), engine.py (signal engine, shadow mode)
-│   ├── core/             # Config, DB pool, auth (JWT)
+│   │                     #   bars.py (BarBuilder ring buffer), engine.py (signal engine, shadow mode),
+│   │                     #   executor.py (order lifecycle, Redis command channel)
+│   ├── core/             # Config, DB pool, auth (JWT), instruments.py (pip size registry)
 │   ├── data/             # OHLCV ingest pipeline, quality checks
 │   └── scripts/          # backfill.py — historical data loader; seed_demo.py — demo data seed
 ├── frontend/
@@ -81,6 +86,7 @@ forex-ai-platform/
 │       └── lib/          # auth.ts, settings.ts, strategyLabels.ts
 ├── db/migrations/        # SQL migration files (apply manually on existing DB)
 ├── nginx/                # nginx.conf + certs
+├── backend/trading_service.py  # standalone trading process (feed + engine + executor)
 ├── docker-compose.yml
 ├── docker-compose.dev.yml  # adds bind mounts + NEXT_PUBLIC_API_URL="" for local hot reload
 └── doppler.yaml
@@ -118,7 +124,7 @@ doppler run -- docker compose up
 - **Domain:** `trading.iogga-co.com` (HTTPS works, SSH does not)
 - **OS:** Ubuntu 24.04, user: `root`
 - **Project path:** `/opt/forex-ai-platform`
-- **Container names:** `forex-ai-platform-fastapi-1`, `forex-ai-platform-celery-1`, `forex-ai-platform-timescaledb-1`
+- **Container names:** `forex-ai-platform-fastapi-1`, `forex-ai-platform-celery-1`, `forex-ai-platform-timescaledb-1`, `forex-ai-platform-trading-service-1`
 
 ```bash
 # SSH
@@ -415,22 +421,18 @@ Backtest / Optimize / Refine buttons live in the **top toolbar** (`ml-auto` div)
 
 ### Global CSS density overrides
 
-`src/app/globals.css` overrides Tailwind utilities to keep the UI compact. Do not remove these — they are intentional global tightening, not bugs:
+`src/app/globals.css` compresses padding in **compact mode** (default). Scoped to `:root:not(.spacious)` so the density toggle works. Do not remove — intentional global tightening:
 
 ```css
-/* Padding compression */
-.px-3, .px-4, .px-6 { padding-left: 0.5rem; padding-right: 0.5rem; }
-.pl-6               { padding-left: 0.5rem; }
-.py-3               { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-
-/* Muted text override */
-.text-slate-500 { color: rgb(148 163 184); }   /* slightly lighter than default */
-
-/* Hide number input spinners */
-.no-spinner::-webkit-outer-spin-button,
-.no-spinner::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.no-spinner { -moz-appearance: textfield; }
+:root:not(.spacious) .px-4 { padding-left: 0.5rem; padding-right: 0.5rem; }
+:root:not(.spacious) .px-3 { padding-left: 0.5rem; padding-right: 0.5rem; }
+:root:not(.spacious) .py-3 { padding-top:  0.5rem; padding-bottom: 0.5rem; }
+:root:not(.spacious) .px-6 { padding-left: 0.5rem; padding-right: 0.5rem; }
+:root:not(.spacious) .pl-6 { padding-left: 0.5rem; }
+:root:not(.spacious) .py-2 { padding-top:  0.5rem; padding-bottom: 0.5rem; }
 ```
+
+`DensityProvider` (client component in layout) reads `settings.ui_density` from localStorage and toggles `:root.spacious` on `<html>`. Toggle in Settings page. Default: `"compact"`.
 
 ### Full-viewport page wrapper (`-m-1`)
 
@@ -564,7 +566,7 @@ echo "IMAGE_PREFIX=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper
 - pytest exit code 5 = no tests collected (not a failure) — handle with `pytest ... || [ $? -eq 5 ]`
 - Staging deploy only fires on `push` to main, not `workflow_dispatch`
 - `npm ci` requires `package-lock.json` in sync — commit both together after any `npm install`
-- **Deploy order matters:** recreate `fastapi celery celery-g-optimize` first → `sleep 5` → recreate `nextjs` → `nginx -s reload`. All three backend services must be listed — `celery-g-optimize` was previously omitted and ran stale code after every deploy.
+- **Deploy order matters:** recreate `fastapi celery celery-g-optimize trading-service` first → `sleep 5` → recreate `nextjs` → `nginx -s reload`. All backend services must be listed explicitly.
 - **DB migrations in deploy:** CI deploy script runs all migrations via `doppler run -- bash -c 'for f in db/migrations/*.sql; do psql ... -f ...; done'` with `|| true` so already-applied migrations are ignored silently. Migrations are NOT auto-applied on existing volumes — always add a migration file; the CI loop handles it.
 - **Nginx reload fallback:** `nginx -s reload 2>/dev/null || docker compose up -d --force-recreate nginx` — if nginx crashed, bring it back rather than exiting CI with code 1.
 - **Local main diverges after squash merges** — always create new branches from `origin/main` (`git checkout -b feat/foo origin/main`), never from local `main`.
@@ -636,6 +638,62 @@ Response schema identical to `GET /api/analytics/backtest/{id}/indicators` — f
 
 ---
 
+## Phase 5 architectural patterns
+
+### Trading service decomposition (Phase 5.1)
+
+`backend/trading_service.py` — standalone asyncio process. Feed, engine, and executor run here, **not** in the FastAPI process. FastAPI lifespan now only manages the DB pool and Redis bridge task.
+
+**Redis channels used for web ↔ trading-service communication:**
+
+| Key / Channel | Direction | Purpose |
+|---|---|---|
+| `ticks:{pair}` | feed → engine | OANDA tick pub/sub |
+| `live:signals` | engine → executor | trade signal pub/sub |
+| `live:commands` | web → executor | kill-switch commands |
+| `live:cmd_results:{request_id}` | executor → web | kill-switch response (Redis list, 30s TTL) |
+| `live:account_balance` | executor → web | balance cache (30s TTL, written each poll) |
+| `live:heartbeat` | trading-service → Docker | health check key (60s TTL, written every 30s) |
+
+Kill-switch flow: router publishes to `live:commands` → executor handles it → pushes result to `live:cmd_results:{request_id}` → router `blpop`s with 10s timeout.
+
+`get_executor()` / `set_executor()` singleton **no longer exist** — the executor runs in the trading-service process.
+
+### MFA — TOTP for kill-switch (Phase 5.0.4)
+
+`POST /api/auth/mfa/setup` — generates TOTP secret, returns `{secret, otpauth_uri}`. Scan with Google Authenticator or Authy.
+`POST /api/auth/mfa/verify` — validates TOTP code, returns `{mfa_token}` (15-min JWT, type=`"mfa"`).
+`GET /api/auth/mfa/status` — returns `{configured, enabled}`.
+
+`require_mfa` FastAPI dependency (`core/auth.py`) — reads `X-MFA-Token` header, validates JWT type=`"mfa"`. Applied to `POST /api/trading/kill-switch`.
+
+Frontend flow: kill-switch button → TOTP input → verify → kill-switch with `X-MFA-Token` header.
+DB table: `operator_mfa` (migration 022).
+
+### InstrumentRegistry (Phase 5.0.3)
+
+`backend/core/instruments.py` — `get_pip_size(symbol: str) -> float`.
+
+Centralises pip sizes for all pairs. Normalises `"EUR/USD"` → `"EURUSD"`, case-insensitive. Falls back to `0.0001` for unknown symbols. Used in `engine/parser.py` and `live/executor.py`. Do not add `"JPY" in symbol` string checks anywhere — use `get_pip_size()`.
+
+### Settings.for_testing() (Phase 5.2.12)
+
+`core/config.py` — `Settings.for_testing(**overrides)` classmethod creates a Settings instance with safe test defaults for all required fields. Use in unit tests that don't need real env vars:
+
+```python
+s = Settings.for_testing(live_trading_enabled=True)
+```
+
+### Toast notifications (Phase 5.2.1)
+
+`sonner` is installed. `<Toaster theme="dark" position="bottom-right" richColors />` in `layout.tsx`. Fire toasts with `import { toast } from "sonner"` → `toast.success("msg")` / `toast.error("msg")`. Applied to optimization `complete` SSE event and any background task completions.
+
+### Frontend testing (Phase 5.2.13)
+
+`vitest` is set up for pure utility functions. Config: `frontend/vitest.config.ts`. Test files: `frontend/src/__tests__/`. Run: `npm test` inside the nextjs container or locally. Currently covers `strategyLabels.ts` (24 tests). Do not use Jest — vitest is already configured.
+
+---
+
 ## Live Trading — Phase 4 architecture (`backend/live/`)
 
 `backend/live/oanda.py` — async OANDA v20 client (httpx):
@@ -644,10 +702,11 @@ Response schema identical to `GET /api/analytics/backtest/{id}/indicators` — f
 - `close_position(instrument)`, `get_open_positions()`, `get_account_summary()`
 - Constructor accepts `base_url`/`stream_url` for testing against a mock
 
-`backend/live/feed.py` — asyncio task registered in FastAPI lifespan:
+`backend/live/feed.py` — asyncio task running in **trading-service** (not FastAPI):
 - Streams all 6 pairs from OANDA, publishes ticks to Redis `ticks:{pair}` channels
 - Always runs regardless of `LIVE_TRADING_ENABLED` — the price ticker needs it
 - Exponential backoff reconnect on failure (max 60s)
+- Heartbeat staleness check: if no OANDA heartbeat for >30s, raises `RuntimeError` to trigger reconnect
 
 `/ws/prices/{pair}` — WebSocket endpoint in `routers/ws.py`. No auth — relays `ticks:{pair}` from Redis to browser.
 
