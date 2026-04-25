@@ -55,6 +55,7 @@ def main() -> None:
     pairs = [p.strip() for p in os.environ.get("BACKFILL_PAIRS", ",".join(_DEFAULT_PAIRS)).split(",")]
     timeframes = [t.strip() for t in os.environ.get("BACKFILL_TIMEFRAMES", ",".join(_DEFAULT_TIMEFRAMES)).split(",")]
     dry_run = os.environ.get("DRY_RUN", "0") == "1"
+    strict  = os.environ.get("BACKFILL_STRICT", "0") == "1" or "--strict" in sys.argv
 
     end_default = date.today() - timedelta(days=1)
     start_default = end_default - timedelta(days=365 * 5)
@@ -68,6 +69,7 @@ def main() -> None:
     logger.info("  Timeframes : %s", ", ".join(timeframes))
     logger.info("  Date range : %s → %s", start, end)
     logger.info("  Dry run    : %s", dry_run)
+    logger.info("  Strict     : %s", strict)
     logger.info("=" * 60)
 
     summary: list[dict] = []
@@ -77,6 +79,12 @@ def main() -> None:
             logger.info("--- %s %s ---", pair, timeframe)
             result = _backfill_one(pair, timeframe, start, end, dry_run)
             summary.append(result)
+            if strict and result["gaps"] > 0:
+                logger.error(
+                    "STRICT MODE: %d gap(s) detected in %s %s — aborting",
+                    result["gaps"], pair, timeframe,
+                )
+                sys.exit(1)
             logger.info(
                 "  Inserted: %d  Skipped: %d  Gaps: %d  Outliers removed: %d",
                 result["inserted"],

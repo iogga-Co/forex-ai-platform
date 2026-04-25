@@ -88,7 +88,13 @@ async def main() -> None:
     logger.info("Trading service shutting down…")
     for t in tasks:
         t.cancel()
-    await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=15.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Trading service shutdown timed out after 15s — forcing exit")
 
     await core_db.close_pool()
     logger.info("Trading service stopped")

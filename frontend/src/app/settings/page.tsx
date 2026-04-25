@@ -358,6 +358,31 @@ export default function SettingsPage() {
         </Row>
       </Section>
 
+      {/* ── Interface ── */}
+      <Section title="Interface">
+        <Row label="UI density" hint="Compact reduces padding throughout the UI. Spacious restores default Tailwind spacing.">
+          <div className="flex gap-2">
+            {(["compact", "spacious"] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => {
+                  set("ui_density", d);
+                  saveSettings({ ...s, ui_density: d });
+                  document.documentElement.classList.toggle("spacious", d === "spacious");
+                }}
+                className={`px-3 py-1 rounded border text-[11px] transition-colors ${
+                  s.ui_density === d
+                    ? "border-blue-600 bg-blue-900/30 text-blue-400"
+                    : "border-zinc-600 text-zinc-400 hover:border-zinc-500"
+                }`}
+              >
+                {d.charAt(0).toUpperCase() + d.slice(1)}
+              </button>
+            ))}
+          </div>
+        </Row>
+      </Section>
+
       {/* ── AI Model ── */}
       <div>
         <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-3">

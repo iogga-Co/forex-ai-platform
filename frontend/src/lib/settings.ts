@@ -20,6 +20,9 @@ export interface PlatformSettings {
 
   // AI model
   ai_model: string;
+
+  // UI
+  ui_density: "compact" | "spacious";
 }
 
 export const DEFAULTS: PlatformSettings = {
@@ -32,6 +35,7 @@ export const DEFAULTS: PlatformSettings = {
   default_pair: "EURUSD",
   default_timeframe: "1H",
   ai_model: "claude-sonnet-4-6",
+  ui_density: "compact",
 };
 
 const KEY = "platform_settings";
