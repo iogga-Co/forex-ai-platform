@@ -162,10 +162,27 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
+interface MFAStatus {
+  configured: boolean;
+  enabled: boolean;
+}
+
+interface MFASetup {
+  secret: string;
+  otpauth_uri: string;
+}
+
 export default function SettingsPage() {
   const [s, setS] = useState<PlatformSettings>(DEFAULTS);
   const [saved, setSaved] = useState(false);
   const [usage, setUsage] = useState<ModelUsage[]>([]);
+
+  // MFA state
+  const [mfaStatus,    setMfaStatus]    = useState<MFAStatus | null>(null);
+  const [mfaSetup,     setMfaSetup]     = useState<MFASetup | null>(null);
+  const [mfaCode,      setMfaCode]      = useState("");
+  const [mfaMsg,       setMfaMsg]       = useState("");
+  const [mfaLoading,   setMfaLoading]   = useState(false);
 
   useEffect(() => {
     setS(loadSettings());
@@ -173,7 +190,43 @@ export default function SettingsPage() {
       .then((r) => r.json())
       .then((d) => setUsage(d.usage ?? []))
       .catch(() => {});
+    fetchWithAuth("/api/auth/mfa/status")
+      .then((r) => r.json())
+      .then((d) => setMfaStatus(d))
+      .catch(() => {});
   }, []);
+
+  async function handleMfaSetup() {
+    setMfaLoading(true); setMfaMsg("");
+    try {
+      const res = await fetchWithAuth("/api/auth/mfa/setup", { method: "POST" });
+      const data = await res.json();
+      setMfaSetup(data);
+      setMfaStatus((prev) => ({ ...prev!, configured: true }));
+    } catch { setMfaMsg("Setup failed"); }
+    finally { setMfaLoading(false); }
+  }
+
+  async function handleMfaVerify() {
+    setMfaLoading(true); setMfaMsg("");
+    try {
+      const res = await fetchWithAuth("/api/auth/mfa/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: mfaCode }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setMfaMsg(err.detail ?? "Invalid code");
+        return;
+      }
+      setMfaStatus({ configured: true, enabled: true });
+      setMfaSetup(null);
+      setMfaCode("");
+      setMfaMsg("MFA enabled successfully");
+    } catch { setMfaMsg("Verification failed"); }
+    finally { setMfaLoading(false); }
+  }
 
   function set<K extends keyof PlatformSettings>(key: K, value: PlatformSettings[K]) {
     setS((prev) => ({ ...prev, [key]: value }));
@@ -386,6 +439,78 @@ export default function SettingsPage() {
           </table>
         </div>
       </div>
+
+      {/* ── Security / MFA ── */}
+      <Section title="Security">
+        <Row
+          label="Multi-factor authentication"
+          hint="Required to execute the Kill Switch in live trading."
+        >
+          {mfaStatus === null ? (
+            <span className="text-[11px] text-zinc-600">Loading…</span>
+          ) : mfaStatus.enabled ? (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-green-900/30 border border-green-800 text-green-400 text-[10px] font-semibold">
+              ✓ Enabled
+            </span>
+          ) : (
+            <button
+              onClick={handleMfaSetup}
+              disabled={mfaLoading}
+              className="rounded border border-blue-700 px-2 py-1 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-40 transition-colors"
+            >
+              {mfaLoading ? "…" : mfaStatus.configured ? "Re-configure" : "Set up MFA"}
+            </button>
+          )}
+        </Row>
+
+        {mfaSetup && (
+          <div className="px-4 py-3 space-y-3 border-t border-zinc-700">
+            <p className="text-xs text-zinc-400">
+              Scan this URI with your authenticator app (Google Authenticator, Authy, etc.),
+              then enter the 6-digit code to confirm.
+            </p>
+            <div className="bg-zinc-900 rounded border border-zinc-700 px-3 py-2">
+              <p className="text-[10px] text-zinc-500 mb-1">Secret key (manual entry)</p>
+              <code className="text-[11px] text-yellow-400 font-mono break-all">{mfaSetup.secret}</code>
+            </div>
+            <div className="bg-zinc-900 rounded border border-zinc-700 px-3 py-2">
+              <p className="text-[10px] text-zinc-500 mb-1">OTP Auth URI</p>
+              <code className="text-[10px] text-zinc-400 font-mono break-all">{mfaSetup.otpauth_uri}</code>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={mfaCode}
+                onChange={(e) => { setMfaCode(e.target.value.replace(/\D/g, "")); setMfaMsg(""); }}
+                placeholder="6-digit code"
+                className="w-28 rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 font-mono text-center focus:outline-none focus:border-blue-500"
+              />
+              <button
+                onClick={handleMfaVerify}
+                disabled={mfaLoading || mfaCode.length !== 6}
+                className="rounded border border-blue-700 px-2 py-1 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-40 transition-colors"
+              >
+                {mfaLoading ? "…" : "Verify & enable"}
+              </button>
+              {mfaMsg && (
+                <span className={`text-[11px] ${mfaMsg.includes("success") ? "text-green-400" : "text-red-400"}`}>
+                  {mfaMsg}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {mfaMsg && !mfaSetup && (
+          <div className="px-4 py-2">
+            <p className={`text-[11px] ${mfaMsg.includes("success") ? "text-green-400" : "text-red-400"}`}>
+              {mfaMsg}
+            </p>
+          </div>
+        )}
+      </Section>
 
       {/* ── Actions ── */}
       <div className="flex items-center gap-3">

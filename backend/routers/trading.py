@@ -15,7 +15,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
-from core.auth import TokenData, get_current_user
+from core.auth import TokenData, get_current_user, require_mfa
 from core.config import settings
 from core.db import get_pool
 from live.executor import get_executor
@@ -184,6 +184,7 @@ async def get_order_history(
 @router.post("/kill-switch", status_code=status.HTTP_200_OK)
 async def kill_switch(
     _: Annotated[TokenData, Depends(get_current_user)],
+    _mfa: Annotated[None, Depends(require_mfa)],
 ) -> dict:
     """
     Emergency stop — closes all open OANDA positions and marks all
