@@ -631,7 +631,7 @@ function SuperchartPageInner() {
         userOverlaySeriesRef.current.push(su, sm2, sl);
 
       } else if (type === "RSI") {
-        const s = sub.addLineSeries({ color, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `RSI ${period}` });
+        const s = sub.addLineSeries({ color, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `RSI ${period}`, priceFormat: { type: "price", precision: 1, minMove: 0.1 } });
         s.setData(toChartData(times, rsi(closes, period)) as { time: Time; value: number }[]);
         s.createPriceLine({ price: 70, color: "#ef4444", lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "70" });
         s.createPriceLine({ price: 30, color: "#22c55e", lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "30" });
@@ -711,7 +711,7 @@ function SuperchartPageInner() {
     if (osc === "RSI") {
       const { period } = params.RSI;
       const data = toChartData(times, rsi(closes, period));
-      const s = sub.addLineSeries({ color: OSC_COLORS.rsi, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `RSI ${period}` });
+      const s = sub.addLineSeries({ color: OSC_COLORS.rsi, lineWidth: 1 as LineWidth, priceLineVisible: false, title: `RSI ${period}`, priceFormat: { type: "price", precision: 1, minMove: 0.1 } });
       s.setData(data as { time: Time; value: number }[]);
       // Reference lines at 30/70
       s.createPriceLine({ price: 70, color: "#ef4444", lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "70" });

@@ -342,7 +342,8 @@ function LabInner() {
             subRefs.current.push(s);
           } else {
             const s = sub.addLineSeries({ color:series.color, lineWidth:1 as LineWidth,
-              priceLineVisible:false, lastValueVisible:false, title:series.name });
+              priceLineVisible:false, lastValueVisible:false, title:series.name,
+              ...(group.type === "RSI" ? { priceFormat: { type: "price" as const, precision: 1, minMove: 0.1 } } : {}) });
             s.setData(series.data as {time:Time;value:number}[]);
             if (subRefs.current.length === 0) {
               group.levels?.forEach(lvl => s.createPriceLine({
