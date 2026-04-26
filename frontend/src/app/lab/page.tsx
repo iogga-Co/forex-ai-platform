@@ -6,7 +6,8 @@ import {
   createChart, CrosshairMode, IChartApi, ISeriesApi,
   LineStyle, LineWidth, Time,
 } from "lightweight-charts";
-import { fetchWithAuth } from "@/lib/auth";
+import { fetchWithAuth, getAccessToken } from "@/lib/auth";
+import { loadSettings } from "@/lib/settings";
 import Spinbox from "@/components/Spinbox";
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,11 @@ interface SavedIndicator {
 interface SeriesData { name: string; color: string; data: {time:number;value:number}[]; style?: string; }
 interface IndicatorGroup { id: string; type: string; pane: string; levels?: {value:number;color:string}[]; series: SeriesData[]; }
 interface Candle { time: number; open: number; high: number; low: number; close: number; }
+interface AiMessage { role: "user"|"assistant"; content: string; }
+interface AiIR {
+  indicators: { type: string; params: Record<string,unknown>; color?: string }[];
+  conditions?: { indicator: string; operator: string; period: number; value?: number }[];
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -141,6 +147,14 @@ function LabInner() {
   const [saveMsg,   setSaveMsg]   = useState("");
   const [exporting, setExporting] = useState(false);
 
+  // AI panel
+  const [aiMessages,  setAiMessages]  = useState<AiMessage[]>([]);
+  const [aiIR,        setAiIR]        = useState<AiIR|null>(null);
+  const [aiInput,     setAiInput]     = useState("");
+  const [aiStreaming,  setAiStreaming]  = useState(false);
+  const [irHeight,    setIrHeight]    = useState(180);
+  const [irCollapsed, setIrCollapsed] = useState(false);
+
   // Chart refs
   const mainDivRef      = useRef<HTMLDivElement>(null);
   const subDivRef       = useRef<HTMLDivElement>(null);
@@ -153,6 +167,7 @@ function LabInner() {
   const syncingRef      = useRef(false);
   const crosshairSync   = useRef(false);
   const recomputeTimer  = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const aiChatEndRef    = useRef<HTMLDivElement>(null);
 
   // ---------------------------------------------------------------------------
   // Init charts
@@ -394,6 +409,11 @@ function LabInner() {
     );
   }, [signals]);
 
+  // Auto-scroll AI chat on new messages
+  useEffect(() => {
+    aiChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [aiMessages]);
+
   // ---------------------------------------------------------------------------
   // Builder helpers
   // ---------------------------------------------------------------------------
@@ -437,22 +457,26 @@ function LabInner() {
   // Save as Indicator
   // ---------------------------------------------------------------------------
   async function saveIndicator() {
-    if (indicators.length === 0) return;
+    const effectiveInds = aiIR
+      ? aiIR.indicators
+      : indicators.map(i => ({
+          type:i.type, color:i.color,
+          params: { period:i.period, fast:i.fast, slow:i.slow, signal_period:i.signal_period,
+                    std_dev:i.std_dev, k_smooth:i.k_smooth, d_period:i.d_period },
+        }));
+    const effectiveConds = aiIR
+      ? (aiIR.conditions ?? [])
+      : conditions.map(c => ({ indicator:c.indicator, operator:c.operator, period:c.period, value:c.value }));
+    if (effectiveInds.length === 0) return;
     setSaving(true); setSaveMsg("");
     try {
-      const name = indName.trim() || suggestedName;
+      const name = indName.trim() || aiSuggestedName;
       const res = await fetchWithAuth(`${API_BASE}/api/lab/indicators/saved`, {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           name, status: indStatus,
-          indicator_config: {
-            indicators: indicators.map(i => ({
-              type:i.type, color:i.color,
-              params: { period:i.period, fast:i.fast, slow:i.slow, signal_period:i.signal_period,
-                        std_dev:i.std_dev, k_smooth:i.k_smooth, d_period:i.d_period },
-            })),
-          },
-          signal_conditions: conditions.map(({id:_,...c}) => c),
+          indicator_config: { indicators: effectiveInds },
+          signal_conditions: effectiveConds,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -469,12 +493,15 @@ function LabInner() {
   // Export as Strategy
   // ---------------------------------------------------------------------------
   async function exportStrategy() {
-    if (conditions.length === 0) return;
+    const effectiveConds = aiIR
+      ? (aiIR.conditions ?? [])
+      : conditions;
+    if (effectiveConds.length === 0) return;
     setExporting(true);
     try {
-      const entry_conditions = conditions.map(c => ({
+      const entry_conditions = effectiveConds.map(c => ({
         indicator: c.indicator, period: c.period, operator: c.operator,
-        ...([">" ,"<"].includes(c.operator) ? { value: c.value } : {}),
+        ...([">" ,"<"].includes(c.operator) && c.value !== undefined ? { value: c.value } : {}),
       }));
       const sir = {
         entry_conditions,
@@ -489,7 +516,7 @@ function LabInner() {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           ir_json: sir,
-          description: indName.trim() || suggestedName,
+          description: indName.trim() || aiSuggestedName,
           pair, timeframe,
         }),
       });
@@ -538,12 +565,133 @@ function LabInner() {
   }
 
   // ---------------------------------------------------------------------------
+  // AI panel
+  // ---------------------------------------------------------------------------
+  function onDividerMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = irHeight;
+    function onMove(ev: MouseEvent) {
+      setIrHeight(Math.max(40, Math.min(600, startH + ev.clientY - startY)));
+      setIrCollapsed(false);
+    }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
+  async function sendAiMessage() {
+    const content = aiInput.trim();
+    if (!content || aiStreaming) return;
+
+    const userMsg: AiMessage = { role: "user", content };
+    const nextMessages = [...aiMessages, userMsg];
+    setAiMessages(nextMessages);
+    setAiInput("");
+    setAiStreaming(true);
+
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE}/api/lab/analyze?token=${encodeURIComponent(token ?? "")}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: nextMessages,
+          current_config: {
+            indicators: indicators.map(i => ({
+              type: i.type,
+              params: { period: i.period, fast: i.fast, slow: i.slow,
+                        signal_period: i.signal_period, std_dev: i.std_dev,
+                        k_smooth: i.k_smooth, d_period: i.d_period },
+            })),
+            conditions: conditions.map(c => ({
+              indicator: c.indicator, operator: c.operator,
+              period: c.period, value: c.value,
+            })),
+          },
+          pair, timeframe,
+          model: loadSettings().ai_model,
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        setAiMessages(prev => [...prev, { role: "assistant", content: "Request failed." }]);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let raw = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        raw += decoder.decode(value, { stream: true });
+      }
+
+      let assistantText = "";
+      for (const line of raw.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const evt = JSON.parse(line.slice(6));
+          if (evt.type === "ir_update") {
+            setAiIR({ indicators: evt.config.indicators ?? [], conditions: evt.config.conditions ?? [] });
+          } else if (evt.type === "text") {
+            assistantText = evt.content;
+          } else if (evt.type === "error") {
+            assistantText = `Error: ${evt.message}`;
+          }
+        } catch { /* skip malformed */ }
+      }
+
+      if (assistantText) {
+        setAiMessages(prev => [...prev, { role: "assistant", content: assistantText }]);
+      }
+    } catch {
+      setAiMessages(prev => [...prev, { role: "assistant", content: "Connection error." }]);
+    } finally {
+      setAiStreaming(false);
+    }
+  }
+
+  function applyAiIR() {
+    if (!aiIR) return;
+    const newInds: LabIndicator[] = aiIR.indicators.map((ind, i) => {
+      const p = ind.params;
+      const d = DEFAULTS[ind.type as IndType] ?? {};
+      return {
+        id: uid(), type: ind.type as IndType,
+        color: (ind.color as string) || COLORS[i % COLORS.length],
+        period:        Number(p.period)        || d.period        || 14,
+        fast:          Number(p.fast)          || d.fast          || 12,
+        slow:          Number(p.slow)          || d.slow          || 26,
+        signal_period: Number(p.signal_period) || d.signal_period || 9,
+        std_dev:       Number(p.std_dev)       || d.std_dev       || 2.0,
+        k_smooth:      Number(p.k_smooth)      || d.k_smooth      || 3,
+        d_period:      Number(p.d_period)      || d.d_period      || 3,
+      };
+    });
+    const newConds: LabCondition[] = (aiIR.conditions ?? []).map(c => ({
+      id: uid(), indicator: c.indicator, operator: c.operator,
+      period: c.period, value: c.value ?? 0,
+    }));
+    setIndicators(newInds);
+    setConditions(newConds);
+    scheduleRecompute(newInds, newConds);
+  }
+
+  // ---------------------------------------------------------------------------
   // Derived
   // ---------------------------------------------------------------------------
   const uniqueOscTypes = [...new Set(indicators.filter(i => OSC_TYPES.has(i.type)).map(i => i.type))] as OscTab[];
-  const suggestedName  = indicators.length > 0
+  const suggestedName    = indicators.length > 0
     ? `[Lab] ${indicators.map(i=>i.type).join("+")} ${pair} ${timeframe}`
     : `[Lab] ${pair} ${timeframe}`;
+  const aiSuggestedName  = aiIR && aiIR.indicators.length > 0
+    ? `[Lab] ${aiIR.indicators.map(i=>i.type).join("+")} ${pair} ${timeframe}`
+    : suggestedName;
 
   const iCls = "bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-[11px] text-zinc-200 text-right no-spinner";
   const sCls = "bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-[11px] text-zinc-200";
@@ -719,43 +867,6 @@ function LabInner() {
                 ))}
               </div>
 
-              {/* Save / Export */}
-              <div className="px-3 py-2 space-y-2">
-                <div className={`${lCls} font-semibold uppercase tracking-widest`}>Save</div>
-
-                <input
-                  type="text"
-                  placeholder={suggestedName}
-                  value={indName}
-                  onChange={e => setIndName(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-[11px] text-zinc-200 placeholder-zinc-600"
-                />
-
-                <div className="flex items-center gap-3">
-                  {(["draft","complete"] as const).map(s => (
-                    <label key={s} className="flex items-center gap-1 cursor-pointer">
-                      <input type="radio" name="ind_status" value={s} className="accent-blue-500"
-                        checked={indStatus===s} onChange={() => setIndStatus(s)} />
-                      <span className="text-[10px] text-zinc-300 capitalize">{s}</span>
-                    </label>
-                  ))}
-                </div>
-
-                <button onClick={saveIndicator} disabled={saving || indicators.length===0}
-                  className="w-full rounded border border-blue-700 px-2 py-1 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-                  {saving ? "Saving…" : "Save as Indicator"}
-                </button>
-
-                <button onClick={exportStrategy} disabled={exporting || conditions.length===0}
-                  className="w-full rounded border border-zinc-600 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-700/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  title={conditions.length===0 ? "Add signal conditions to export" : undefined}>
-                  {exporting ? "Exporting…" : "Export as Strategy →"}
-                </button>
-
-                {saveMsg && (
-                  <p className={`text-[10px] ${saveMsg.includes("✓") ? "text-green-400" : "text-red-400"}`}>{saveMsg}</p>
-                )}
-              </div>
             </div>
           )}
 
@@ -878,6 +989,168 @@ function LabInner() {
             })}
           </div>
         </div>
+
+        {/* ── AI right panel ─────────────────────────────────── */}
+        <div className="w-64 shrink-0 border-l border-zinc-800 flex flex-col overflow-hidden">
+
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 shrink-0">
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setIrCollapsed(v => !v)}
+                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                title={irCollapsed ? "Expand" : "Collapse"}>
+                <svg
+                  className={`w-2.5 h-2.5 transition-transform duration-150 ${irCollapsed ? "-rotate-90" : ""}`}
+                  viewBox="0 0 10 6" fill="currentColor">
+                  <path d="M0 0l5 6 5-6z"/>
+                </svg>
+              </button>
+              <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">AI Indicator IR</span>
+            </div>
+            {aiIR && (
+              <button onClick={applyAiIR}
+                className="rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors">
+                Apply
+              </button>
+            )}
+          </div>
+
+          {/* IR section — collapsible + drag-resizable */}
+          <div
+            style={{ height: irCollapsed ? 0 : irHeight }}
+            className="shrink-0 overflow-hidden border-b border-zinc-800 transition-[height] duration-150">
+            <div className="h-full overflow-y-auto px-3 py-2">
+            {!aiIR ? null : (
+              <div className="space-y-2">
+                {aiIR.indicators.length > 0 && (
+                  <div>
+                    <div className={`${lCls} font-semibold uppercase tracking-widest mb-1`}>Indicators</div>
+                    <div className="space-y-0.5">
+                      {aiIR.indicators.map((ind, i) => {
+                        const t = ind.type.toUpperCase();
+                        const p = ind.params;
+                        const paramStr = t === "MACD"
+                          ? `${p.fast??12}, ${p.slow??26}, ${p.signal_period??9}`
+                          : t === "BB"
+                          ? `${p.period??20} σ${p.std_dev??2.0}`
+                          : t === "STOCH"
+                          ? `${p.period??14}, ${p.k_smooth??3}, ${p.d_period??3}`
+                          : String(p.period ?? 14);
+                        return (
+                          <div key={i} className="flex items-center gap-1.5 text-[11px]">
+                            {ind.color && (
+                              <span className="w-2 h-2 rounded-full shrink-0" style={{backgroundColor: ind.color}} />
+                            )}
+                            <span className="text-zinc-300">{ind.type}</span>
+                            <span className="text-zinc-500">{paramStr}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {(aiIR.conditions ?? []).length > 0 && (
+                  <div>
+                    <div className={`${lCls} font-semibold uppercase tracking-widest mb-1`}>Conditions</div>
+                    <div className="space-y-0.5">
+                      {(aiIR.conditions ?? []).map((c, i) => (
+                        <div key={i} className="text-[11px] text-zinc-300">
+                          {c.indicator}({c.period}) {c.operator}{c.value !== undefined ? ` ${c.value}` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            </div>
+          </div>
+
+          {/* Drag-to-resize handle */}
+          {!irCollapsed && (
+            <div
+              onMouseDown={onDividerMouseDown}
+              className="h-1 shrink-0 hover:bg-blue-600/50 cursor-row-resize transition-colors"
+              title="Drag to resize"
+            />
+          )}
+
+          {/* Chat section */}
+          <div className="flex flex-col flex-1 overflow-hidden">
+
+            {/* Chat label */}
+            <div className="px-3 py-1.5 shrink-0">
+              <span className={`${lCls} font-semibold uppercase tracking-widest`}>Chat</span>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto px-3 space-y-2 pb-2">
+              {aiMessages.length === 0 ? null : (
+                aiMessages.map((m, i) => (
+                  <div key={i} className={[
+                    "text-[11px] rounded px-2 py-1.5 leading-relaxed",
+                    m.role === "user"
+                      ? "bg-blue-900/20 border border-blue-800/40 text-zinc-200 ml-3"
+                      : "bg-zinc-800/60 border border-zinc-700 text-zinc-300",
+                  ].join(" ")}>
+                    {m.content}
+                  </div>
+                ))
+              )}
+              <div ref={aiChatEndRef} />
+            </div>
+
+            {/* Input */}
+            <div className="px-3 pb-3 pt-2 border-t border-zinc-800 shrink-0">
+              <textarea
+                rows={2}
+                value={aiInput}
+                onChange={e => setAiInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAiMessage(); } }}
+                placeholder={"Ask AI to build an indicator setup…\n\nExamples:\n• EMA crossover with RSI confirmation\n• Bollinger Band squeeze breakout\n• MACD divergence strategy\n\nShift+Enter for new line\nEnter to send"}
+                disabled={aiStreaming}
+                className="w-full resize-none bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-[11px] text-zinc-200 placeholder-zinc-600 disabled:opacity-50 leading-relaxed"
+              />
+              <div className="mt-1.5 space-y-2">
+                <input
+                  type="text"
+                  placeholder={aiSuggestedName}
+                  value={indName}
+                  onChange={e => setIndName(e.target.value)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-[11px] text-zinc-200 placeholder-zinc-600"
+                />
+                <div className="flex items-center gap-3">
+                  {(["draft","complete"] as const).map(s => (
+                    <label key={s} className="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" name="ind_status" value={s} className="accent-blue-500"
+                        checked={indStatus===s} onChange={() => setIndStatus(s)} />
+                      <span className="text-[10px] text-zinc-300 capitalize">{s}</span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  onClick={saveIndicator}
+                  disabled={saving || (aiIR ? aiIR.indicators.length === 0 : indicators.length === 0)}
+                  className="w-full rounded border border-blue-700 px-2 py-1 text-[10px] text-blue-400 hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                  {saving ? "Saving…" : "Save as Indicator"}
+                </button>
+                <button
+                  onClick={exportStrategy}
+                  disabled={exporting || (aiIR ? (aiIR.conditions ?? []).length === 0 : conditions.length === 0)}
+                  className="w-full rounded border border-zinc-600 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-700/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title={(aiIR ? (aiIR.conditions ?? []).length === 0 : conditions.length === 0) ? "Add signal conditions to export" : undefined}>
+                  {exporting ? "Exporting…" : "Export as Strategy →"}
+                </button>
+                {saveMsg && (
+                  <p className={`text-[10px] ${saveMsg.includes("✓") ? "text-green-400" : "text-red-400"}`}>{saveMsg}</p>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+
       </div>
     </div>
   );

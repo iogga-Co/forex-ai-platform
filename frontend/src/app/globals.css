@@ -43,3 +43,8 @@ body {
   color: rgb(200 200 200 / var(--tw-text-opacity, 1));
 }
 
+.text-zinc-600 {
+  --tw-text-opacity: 1;
+  color: rgb(188 188 188 / var(--tw-text-opacity, 1));
+}
+

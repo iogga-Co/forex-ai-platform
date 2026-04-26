@@ -16,6 +16,7 @@ POST /api/lab/analyze             — SSE: Claude analysis of current chart stat
 from __future__ import annotations
 
 import datetime
+import json as _json
 import logging
 from typing import Annotated
 from uuid import UUID
@@ -23,6 +24,7 @@ from uuid import UUID
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.auth import TokenData, get_current_user, get_current_user_sse
@@ -515,11 +517,45 @@ async def delete_saved_indicator(
 
 
 # ---------------------------------------------------------------------------
-# POST /api/lab/analyze — SSE (stub for PR 4)
+# POST /api/lab/analyze — SSE chat
 # ---------------------------------------------------------------------------
+
+class AnalyzeMessage(BaseModel):
+    role: str
+    content: str
+
+
+class AnalyzeRequest(BaseModel):
+    messages: list[AnalyzeMessage] = Field(default_factory=list)
+    current_config: dict = Field(default_factory=dict)
+    pair: str = "EURUSD"
+    timeframe: str = "1H"
+    model: str = "claude-sonnet-4-6"
+
 
 @router.post("/analyze")
 async def analyze_chart(
+    payload: AnalyzeRequest,
     _user: Annotated[TokenData, Depends(get_current_user_sse)],
-) -> dict:
-    raise HTTPException(status_code=501, detail="AI analysis implemented in Lab PR 4")
+) -> StreamingResponse:
+    from ai.lab_agent import analyze as lab_analyze
+
+    async def event_stream():
+        try:
+            text, ir_update = await lab_analyze(
+                messages=[{"role": m.role, "content": m.content} for m in payload.messages],
+                current_config=payload.current_config,
+                pair=payload.pair,
+                timeframe=payload.timeframe,
+                model=payload.model,
+            )
+            if ir_update is not None:
+                yield f"data: {_json.dumps({'type': 'ir_update', 'config': ir_update})}\n\n"
+            if text:
+                yield f"data: {_json.dumps({'type': 'text', 'content': text})}\n\n"
+            yield 'data: {"type": "done"}\n\n'
+        except Exception as exc:
+            logger.error("Lab analyze error: %s", exc)
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

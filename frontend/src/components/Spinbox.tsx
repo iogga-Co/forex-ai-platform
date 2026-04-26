@@ -30,13 +30,20 @@ export default function Spinbox({
   const timerRef  = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const repeatRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
+  // Decimal places implied by step (e.g. 0.1 → 1, 0.01 → 2, 1 → 0)
+  const decimals = float
+    ? (step.toString().split(".")[1]?.length ?? 0)
+    : 0;
+  const round = (n: number) => float ? parseFloat(n.toFixed(decimals)) : Math.round(n);
+  const displayValue = round(value);
+
   function increment() {
-    const next = Math.min(max, value + step);
+    const next = round(Math.min(max, value + step));
     if (next !== value) onChange(next);
   }
 
   function decrement() {
-    const next = Math.max(min, value - step);
+    const next = round(Math.max(min, value - step));
     if (next !== value) onChange(next);
   }
 
@@ -58,12 +65,12 @@ export default function Spinbox({
     <div className={`flex border rounded overflow-hidden shrink-0 ${borderCls} ${width}`}>
       <input
         type="number"
-        value={value}
+        value={displayValue}
         min={min}
         max={max}
         step={step}
         onChange={(e) => {
-          const v = float ? parseFloat(e.target.value) : Math.round(parseFloat(e.target.value));
+          const v = round(parseFloat(e.target.value));
           if (!isNaN(v) && v >= min && v <= max) onChange(v);
         }}
         onFocus={onFocus}
