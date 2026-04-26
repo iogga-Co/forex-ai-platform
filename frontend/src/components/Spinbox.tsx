@@ -27,8 +27,8 @@ export default function Spinbox({
   active = false,
   width = "w-11",
 }: SpinboxProps) {
-  const timerRef  = useRef<ReturnType<typeof setTimeout>>();
-  const repeatRef = useRef<ReturnType<typeof setInterval>>();
+  const timerRef  = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const repeatRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   function increment() {
     const next = Math.min(max, value + step);
