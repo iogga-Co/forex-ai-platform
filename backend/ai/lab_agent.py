@@ -118,7 +118,7 @@ async def analyze(
     if conds:
         cond_str = ", ".join(
             f"{c['indicator']}({c.get('period', 14)}) {c['operator']}"
-            f"{f' {c[\"value\"]}' if c.get('value') is not None else ''}"
+            + (f" {c['value']}" if c.get("value") is not None else "")
             for c in conds
         )
         ctx_lines.append(f"Active conditions: {cond_str}")
