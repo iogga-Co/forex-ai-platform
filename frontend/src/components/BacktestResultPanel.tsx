@@ -393,6 +393,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
           lastValueVisible: true,
           crosshairMarkerVisible: true,
           title: s.name,
+          ...(group.type === "RSI" ? { priceFormat: { type: "price" as const, precision: 1, minMove: 0.1 } } : {}),
         });
         line.setData(s.data.map((d) => ({ time: d.time as UTCTimestamp, value: d.value })));
         if (i === 0) {
