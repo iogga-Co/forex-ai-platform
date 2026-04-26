@@ -48,7 +48,7 @@ AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (
 | 1 | Core Engine | ✅ Complete |
 | 2 | AI Intelligence | ✅ Complete |
 | 3 | Analytics Suite | ✅ Complete |
-| 3.5 | Indicator Lab | ✅ Complete — PRs #108–#113 merged |
+| 3.5 | Indicator Lab | ✅ Complete — PRs #108–#113 merged + AI panel 2026-04-26 |
 | 3.6 | G-Optimize | ✅ Complete — PR #102 |
 | 4 | Live Trading | ✅ Complete — PRs #106, #115, #117, #118 merged |
 | 5.0 | Live Trading Hardening | ✅ Complete — ATR abort, reconciliation, pip registry, MFA |
@@ -80,7 +80,7 @@ forex-ai-platform/
 │   └── scripts/          # backfill.py — historical data loader; seed_demo.py — demo data seed
 ├── frontend/
 │   └── src/
-│       ├── app/          # Next.js pages: backtest, copilot, dashboard, g-optimize, lab (stub),
+│       ├── app/          # Next.js pages: backtest, copilot, dashboard, g-optimize, lab,
 │       │                 #   live, login, news, optimization, settings, strategies, superchart
 │       ├── components/   # BacktestResultPanel, TradeAnalysisSidebar, AuthGuard, etc.
 │       └── lib/          # auth.ts, settings.ts, strategyLabels.ts
@@ -595,7 +595,7 @@ Detailed specs for planned features live in `docs/specs/`:
 
 | Spec | File | Phase | Status |
 |---|---|---|---|
-| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — visual sandbox, AI suggestions, saves as Indicator or Strategy; Superchart overlay integration | ✅ Complete — PRs #108–#113 |
+| Indicator Lab | `docs/specs/indicator-lab.md` | 3.5 — visual sandbox, AI suggestions, saves as Indicator or Strategy; Superchart overlay integration | ✅ Complete — PRs #108–#113 + AI panel 2026-04-26 |
 | G-Optimize | `docs/specs/g-optimize.md` | 3.6 — global automated strategy discovery: random param search → backtest → RAG inject → Co-Pilot ranking | ✅ Complete (PR #102) |
 | ML Signal Engine | `docs/specs/ml-engine.md` | 5 — LightGBM model, single inference path for backtest + live, model registry | 🔲 Specced |
 
@@ -619,7 +619,7 @@ Detailed specs for planned features live in `docs/specs/`:
 | `POST /api/lab/indicators/saved` | JWT | Create saved indicator |
 | `PUT /api/lab/indicators/saved/{id}` | JWT | Update name / status / config |
 | `DELETE /api/lab/indicators/saved/{id}` | JWT | Delete |
-| `POST /api/lab/analyze` | SSE | Claude chart analysis (stub — implemented in Lab PR 4) |
+| `POST /api/lab/analyze` | SSE | Claude indicator config chat — accepts messages + current_config; streams `ir_update` / `text` / `done` events |
 
 `POST /api/lab/indicators` request:
 ```json
@@ -635,6 +635,54 @@ Detailed specs for planned features live in `docs/specs/`:
 Response schema identical to `GET /api/analytics/backtest/{id}/indicators` — frontend chart rendering is reused.
 
 `DELETE /api/lab/indicators/saved/{id}` requires `response_model=None` explicitly (FastAPI 204 assertion — `-> None` alone is insufficient in current version).
+
+### Indicator Lab — AI panel (`/analyze` endpoint)
+
+`backend/ai/lab_agent.py` — Claude tool-use agent for the right-panel chat.
+
+**Tool:** `set_indicator_config` — Claude calls this to suggest indicator + condition configs. Result emitted as `ir_update` SSE event; text reply emitted as `text` event.
+
+**Request body:**
+```json
+{
+  "messages": [{"role": "user", "content": "..."}],
+  "current_config": {"indicators": [...], "conditions": [...]},
+  "pair": "EURUSD", "timeframe": "1H", "model": "claude-sonnet-4-6"
+}
+```
+
+**SSE events:** `{"type": "ir_update", "config": {...}}` → `{"type": "text", "content": "..."}` → `{"type": "done"}`
+
+**Frontend SSE call:** raw `fetch()` with `?token=getAccessToken()` (not `fetchWithAuth` — SSE needs query-param auth).
+
+**Anthropic SDK typing:** `block.input` is typed as `object` — use `cast(dict[str, Any], block.input)`. Tools list needs `# type: ignore[list-item]`. Messages need `cast(list[MessageParam], ...)`.
+
+**Nested f-string caveat:** `f"{f' {x[\"k\"]}' if ... else ''}"` is invalid syntax (ruff rejects). Use string concatenation: `f"..." + (f" {x['k']}" if ... else "")`.
+
+### Indicator Lab — right panel layout
+
+The Lab has three columns: Left panel (w-52, Builder/Library tabs) | Chart (flex-1) | AI right panel (w-64).
+
+**AI right panel sections (top → bottom):**
+1. **Header** — "AI Indicator IR" title + chevron toggle (collapse/expand) + "Apply" button (appears once AI has suggested a config)
+2. **IR section** — collapsible (`irCollapsed` state) + drag-resizable (`irHeight` state, 40–600px). Shows AI-suggested indicators and conditions. Uses smooth `transition-[height]`.
+3. **Drag handle** — thin strip between IR section and chat; `cursor-row-resize`, turns blue on hover.
+4. **Chat label** + scrollable **message history** — user messages right-tinted blue, assistant messages grey.
+5. **2-row textarea** — `Enter` sends, `Shift+Enter` newlines; `resize-none`.
+6. **Save section** — name input (placeholder = `aiSuggestedName`), draft/complete radio, "Save as Indicator", "Export as Strategy →".
+
+**Save/Export logic:** `saveIndicator()` and `exportStrategy()` check `aiIR` first — if present, use the AI-generated IR; otherwise fall back to the builder `indicators`/`conditions` state. The Save section was moved from the left panel into the AI panel.
+
+**`aiSuggestedName`:** `[Lab] {types joined by +} {pair} {timeframe}` derived from `aiIR.indicators` if available, else `suggestedName` from builder.
+
+### Spinbox float rounding
+
+`frontend/src/components/Spinbox.tsx` — when `float=true`, derives decimal places from `step` and rounds everywhere:
+```typescript
+const decimals = float ? (step.toString().split(".")[1]?.length ?? 0) : 0;
+const round = (n: number) => float ? parseFloat(n.toFixed(decimals)) : Math.round(n);
+```
+Applied to `displayValue`, `increment()`, `decrement()`, and typed input `onChange`. Prevents `0.7999...` showing instead of `0.8` when `step=0.1`.
 
 ---
 

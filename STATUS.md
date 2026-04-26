@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-25 (Phase 5.0–5.2 complete — live hardening, microservice decomposition, UX wins)
+**Last updated:** 2026-04-26 (Indicator Lab AI panel + Spinbox rounding fix deployed to staging)
 
 ---
 
@@ -12,7 +12,7 @@
 | **1** | Core Engine | ✅ Complete | ✅ 58 tests pass, CI green, PR #7 merged, staging live |
 | **2** | AI Intelligence | ✅ Complete | ✅ Strategy created → backtest runs → results stored. AI summary live |
 | **3** | Analytics Suite | ✅ Complete | ✅ 283 trades stored, equity curve 283 pts, all /api/analytics endpoints live |
-| **3.5** | Indicator Lab | ✅ Complete | ✅ PRs #108–#113 merged, staging live 2026-04-21 |
+| **3.5** | Indicator Lab | ✅ Complete | ✅ PRs #108–#113 merged + AI panel 2026-04-26 |
 | **3.6** | G-Optimize | ✅ Complete | ✅ 148 tests pass, PR #102 merged, staging live 2026-04-19 |
 | **4** | Live Trading | ✅ Complete | ✅ PRs #106, #115, #117, #118 merged; 188 tests pass; staging live 2026-04-23 |
 | **5.0** | Live Trading Hardening | ✅ Complete | ✅ ATR abort, reconciliation, pip registry, MFA — 209 tests pass |
@@ -23,13 +23,13 @@
 
 ---
 
-## Current Staging State (2026-04-25)
+## Current Staging State (2026-04-26)
 
 | Item | Value |
 |---|---|
 | URL | https://trading.iogga-co.com |
 | Health | ✅ 200 OK |
-| Last deployed commit | `0e6bb9e` (fix: add trading-service to CI deploy script) |
+| Last deployed commit | `22c07ca` (fix: resolve mypy errors in lab_agent.py) |
 | Services | All 10 up (nginx, fastapi, celery, celery-g-optimize, **trading-service**, nextjs, timescaledb, redis, prometheus, grafana) |
 | OANDA mode | `practice` (demo account, account 001-001-21125823-001) |
 | `LIVE_TRADING_ENABLED` | `false` |
@@ -962,11 +962,38 @@ Warmup for indicator overlays scales by `minutes_per_bar × 300 bars`.
 
 ---
 
+## Session 2026-04-26 — Indicator Lab AI Panel + Bug Fixes
+
+| Commit | Change |
+|---|---|
+| `ffafe8d` | feat: Indicator Lab AI right panel — IR display, chat, save/export wired to AI IR |
+| `11a1b65` | fix: nested f-string invalid syntax in lab_agent.py (ruff rejection) |
+| `22c07ca` | fix: mypy errors in lab_agent.py — cast MessageParam, cast block.input, ignore tools list-item |
+
+### Indicator Lab AI panel
+
+**New right panel** (w-64) added to `/lab`. Three sections:
+
+1. **AI Indicator IR** (top) — collapsible via `▼/▶` chevron; drag-resizable handle between IR and chat (40–600px range); shows AI-suggested indicators and conditions; "Apply" button populates builder + triggers recompute.
+
+2. **Chat** — scrollable message history; 2-row textarea (`Enter` sends, `Shift+Enter` newlines).
+
+3. **Save section** (bottom) — moved from left panel into AI panel. Name input, draft/complete radio, "Save as Indicator", "Export as Strategy →". Both functions use AI IR when available; fall back to builder state otherwise.
+
+**Backend:** `POST /api/lab/analyze` SSE endpoint now fully implemented (was 501 stub). Backed by `backend/ai/lab_agent.py` — Claude tool-use with `set_indicator_config` tool. SSE events: `ir_update` → `text` → `done`.
+
+### Other fixes
+
+- **Spinbox float rounding** — derives decimal places from `step` prop; rounds display, increment, decrement, and typed values. Fixes `0.7999` showing instead of `0.8` in Backtest indicator parameter fields.
+- **`text-zinc-600` CSS override** — `rgb(188 188 188)` added to `globals.css` (joins existing slate-500, zinc-500, gray-500/600 overrides).
+
+---
+
 ## Open Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Staging verification | **Now** | Verify trading-service started; check `live:heartbeat` Redis key; test MFA setup flow |
+| Staging verification | **Now** | Verify AI panel chat works end-to-end on staging |
 | 5.2.8 Skeleton loaders | Low | Enhance skeleton placeholders to match final layout shape |
 | 5.2.11 WCAG contrast | Low | Audit `text-slate-500` / `text-gray-500` contrast ratios |
 | 5.2.14 API docs | Low | Frontend Integration Guide for diagnosis + SSE endpoints |
