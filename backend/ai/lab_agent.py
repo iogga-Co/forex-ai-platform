@@ -5,8 +5,10 @@ Uses Claude tool use to suggest indicator configurations based on user chat.
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 import anthropic
+from anthropic.types import MessageParam
 
 from ai.usage import log_usage
 from core.config import settings
@@ -135,8 +137,8 @@ async def analyze(
         model=model,
         max_tokens=1024,
         system=_SYSTEM,
-        tools=[_TOOL],
-        messages=api_messages,
+        tools=[_TOOL],  # type: ignore[list-item]
+        messages=cast(list[MessageParam], api_messages),
     )
 
     await log_usage(
@@ -152,7 +154,7 @@ async def analyze(
         if block.type == "text":
             text = block.text
         elif block.type == "tool_use" and block.name == "set_indicator_config":
-            ir_update = dict(block.input)
+            ir_update = cast(dict[str, Any], block.input)
 
     if ir_update is not None and not text:
         text = "Indicator configuration updated."
