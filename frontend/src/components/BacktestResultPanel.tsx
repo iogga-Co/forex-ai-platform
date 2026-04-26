@@ -654,7 +654,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
         // Legacy chip helpers (used in JSON view)
         function stopLabel(s: ExitCondition | undefined): string {
           if (!s) return "—";
-          if (s.type === "atr") return `ATR(${s.period}) × ${s.multiplier}`;
+          if (s.type === "atr") return `ATR(${s.period}) × ${s.multiplier?.toFixed(1)}`;
           if (s.type === "fixed_pips") return `${s.pips} pips`;
           if (s.type === "percent") return `${((s.percent ?? 0) * 100).toFixed(2)}%`;
           return s.type;

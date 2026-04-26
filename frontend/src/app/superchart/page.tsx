@@ -1065,9 +1065,9 @@ function SuperchartPageInner() {
                 "text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 font-medium",
                 isActive ? "bg-blue-600 text-white" : inStrategy ? "bg-zinc-700 text-zinc-200 hover:bg-zinc-600" : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700",
               ].join(" ");
-              const numInput = (val: number, onCh: (v: number) => void) => (
+              const numInput = (val: number, onCh: (v: number) => void, min = 1, max = 999) => (
                 <Spinbox
-                  value={val} min={1}
+                  value={val} min={min} max={max}
                   onChange={onCh}
                   onFocus={() => setActiveOsc(tab)}
                   onClick={(e) => e.stopPropagation()}
@@ -1077,19 +1077,19 @@ function SuperchartPageInner() {
               return (
                 <div key={tab} className={`flex items-center gap-1 ${i > 0 ? "ml-2 pl-2 border-l border-zinc-700" : ""}`}>
                   <button onClick={() => setActiveOsc(tab)} className={btnCls}>{tab}</button>
-                  {tab === "RSI"   && numInput(oscParams.RSI.period,           (v) => setOscParams((p) => ({ ...p, RSI: { period: v } })))}
+                  {tab === "RSI"   && numInput(oscParams.RSI.period,           (v) => setOscParams((p) => ({ ...p, RSI: { period: v } })),           2, 100)}
                   {tab === "MACD"  && <div className="flex gap-1">
-                    {numInput(oscParams.MACD.fast,          (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, fast: v } })))}
-                    {numInput(oscParams.MACD.slow,          (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, slow: v } })))}
-                    {numInput(oscParams.MACD.signal_period, (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, signal_period: v } })))}
+                    {numInput(oscParams.MACD.fast,          (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, fast: v } })),          1,  50)}
+                    {numInput(oscParams.MACD.slow,          (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, slow: v } })),          5, 100)}
+                    {numInput(oscParams.MACD.signal_period, (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, signal_period: v } })), 1,  50)}
                   </div>}
-                  {tab === "ADX"   && numInput(oscParams.ADX.period,            (v) => setOscParams((p) => ({ ...p, ADX: { period: v } })))}
+                  {tab === "ADX"   && numInput(oscParams.ADX.period,            (v) => setOscParams((p) => ({ ...p, ADX: { period: v } })),            1, 100)}
                   {tab === "STOCH" && <div className="flex gap-1">
-                    {numInput(oscParams.STOCH.period,   (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, period: v } })))}
-                    {numInput(oscParams.STOCH.k_smooth, (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, k_smooth: v } })))}
-                    {numInput(oscParams.STOCH.d_period, (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, d_period: v } })))}
+                    {numInput(oscParams.STOCH.period,   (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, period: v } })),   1, 100)}
+                    {numInput(oscParams.STOCH.k_smooth, (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, k_smooth: v } })), 1,  50)}
+                    {numInput(oscParams.STOCH.d_period, (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, d_period: v } })), 1,  50)}
                   </div>}
-                  {tab === "ATR"   && numInput(oscParams.ATR.period,            (v) => setOscParams((p) => ({ ...p, ATR: { period: v } })))}
+                  {tab === "ATR"   && numInput(oscParams.ATR.period,            (v) => setOscParams((p) => ({ ...p, ATR: { period: v } })),            2, 100)}
                 </div>
               );
             })}
@@ -1163,10 +1163,10 @@ function SuperchartPageInner() {
             <Section title="Exit Conditions">
               <div className="space-y-1 text-[11px] text-zinc-400">
                 {currentSIR.exit_conditions.stop_loss && (
-                  <div>SL: ATR × {currentSIR.exit_conditions.stop_loss.multiplier ?? "?"} (p={currentSIR.exit_conditions.stop_loss.period ?? "?"})</div>
+                  <div>SL: ATR × {currentSIR.exit_conditions.stop_loss.multiplier?.toFixed(1) ?? "?"} (p={currentSIR.exit_conditions.stop_loss.period ?? "?"})</div>
                 )}
                 {currentSIR.exit_conditions.take_profit && (
-                  <div>TP: ATR × {currentSIR.exit_conditions.take_profit.multiplier ?? "?"} (p={currentSIR.exit_conditions.take_profit.period ?? "?"})</div>
+                  <div>TP: ATR × {currentSIR.exit_conditions.take_profit.multiplier?.toFixed(1) ?? "?"} (p={currentSIR.exit_conditions.take_profit.period ?? "?"})</div>
                 )}
               </div>
             </Section>
@@ -1211,31 +1211,35 @@ function SuperchartPageInner() {
                     {ov.type !== "MACD" && ov.type !== "STOCH" && (
                       <div className="flex items-center gap-2">
                         <label className="text-[10px] text-zinc-500 w-10 shrink-0">Period</label>
-                        <Spinbox value={ov.period} min={2} onChange={(v) => updateOverlay(ov.id, { period: v })} width="w-16" />
+                        <Spinbox
+                          value={ov.period}
+                          min={ov.type === "BB" ? 5 : (ov.type === "RSI" || ov.type === "ATR") ? 2 : 1}
+                          max={ov.type === "EMA" || ov.type === "SMA" ? 999 : 100}
+                          onChange={(v) => updateOverlay(ov.id, { period: v })} width="w-16" />
                         {ov.type === "BB" && (
                           <>
                             <label className="text-[10px] text-zinc-500 shrink-0">σ</label>
-                            <Spinbox value={ov.std_dev} min={0.1} step={0.1} float onChange={(v) => updateOverlay(ov.id, { std_dev: v })} width="w-16" />
+                            <Spinbox value={ov.std_dev} min={0.5} max={5.0} step={0.1} float onChange={(v) => updateOverlay(ov.id, { std_dev: v })} width="w-16" />
                           </>
                         )}
                       </div>
                     )}
                     {ov.type === "MACD" && (
                       <div className="grid grid-cols-3 gap-1">
-                        {([["Fast", "fast", ov.fast], ["Slow", "slow", ov.slow], ["Sig", "signal_period", ov.signal_period]] as [string, keyof ChartOverlay, number][]).map(([lbl, key, val]) => (
+                        {([["Fast", "fast", ov.fast, 1, 50], ["Slow", "slow", ov.slow, 5, 100], ["Sig", "signal_period", ov.signal_period, 1, 50]] as [string, keyof ChartOverlay, number, number, number][]).map(([lbl, key, val, mn, mx]) => (
                           <div key={key}>
                             <label className="text-[10px] text-zinc-500 block">{lbl}</label>
-                            <Spinbox value={val} min={1} onChange={(v) => updateOverlay(ov.id, { [key]: v })} width="w-full" />
+                            <Spinbox value={val} min={mn} max={mx} onChange={(v) => updateOverlay(ov.id, { [key]: v })} width="w-full" />
                           </div>
                         ))}
                       </div>
                     )}
                     {ov.type === "STOCH" && (
                       <div className="grid grid-cols-3 gap-1">
-                        {([["K Prd", "period", ov.period], ["K Sm", "k_smooth", ov.k_smooth], ["D Prd", "d_period", ov.d_period]] as [string, keyof ChartOverlay, number][]).map(([lbl, key, val]) => (
+                        {([["K Prd", "period", ov.period, 1, 100], ["K Sm", "k_smooth", ov.k_smooth, 1, 50], ["D Prd", "d_period", ov.d_period, 1, 50]] as [string, keyof ChartOverlay, number, number, number][]).map(([lbl, key, val, mn, mx]) => (
                           <div key={key}>
                             <label className="text-[10px] text-zinc-500 block">{lbl}</label>
-                            <Spinbox value={val} min={1} onChange={(v) => updateOverlay(ov.id, { [key]: v })} width="w-full" />
+                            <Spinbox value={val} min={mn} max={mx} onChange={(v) => updateOverlay(ov.id, { [key]: v })} width="w-full" />
                           </div>
                         ))}
                       </div>
@@ -1396,20 +1400,24 @@ function ConditionEditor({
 
       {/* Period */}
       <Label label="Period">
-        <Spinbox value={cond.period ?? 14} min={2} max={500} onChange={(v) => onChange({ period: v })} width="w-20" />
+        <Spinbox
+          value={cond.period ?? 14}
+          min={ind === "BB" ? 5 : (ind === "RSI" || ind === "ATR") ? 2 : 1}
+          max={ind === "EMA" || ind === "SMA" ? 999 : 100}
+          onChange={(v) => onChange({ period: v })} width="w-20" />
       </Label>
 
       {/* MACD fast/slow/signal */}
       {ind === "MACD" && (
         <>
           <Label label="Fast">
-            <Spinbox value={cond.fast ?? 12} min={2} max={200} onChange={(v) => onChange({ fast: v })} width="w-20" />
+            <Spinbox value={cond.fast ?? 12} min={1} max={50} onChange={(v) => onChange({ fast: v })} width="w-20" />
           </Label>
           <Label label="Slow">
-            <Spinbox value={cond.slow ?? 26} min={2} max={500} onChange={(v) => onChange({ slow: v })} width="w-20" />
+            <Spinbox value={cond.slow ?? 26} min={5} max={100} onChange={(v) => onChange({ slow: v })} width="w-20" />
           </Label>
           <Label label="Signal">
-            <Spinbox value={cond.signal_period ?? 9} min={2} max={100} onChange={(v) => onChange({ signal_period: v })} width="w-20" />
+            <Spinbox value={cond.signal_period ?? 9} min={1} max={50} onChange={(v) => onChange({ signal_period: v })} width="w-20" />
           </Label>
         </>
       )}
@@ -1417,7 +1425,7 @@ function ConditionEditor({
       {/* BB std_dev */}
       {ind === "BB" && (
         <Label label="Std Dev">
-          <Spinbox value={cond.std_dev ?? 2.0} min={0.5} max={5} step={0.1} float onChange={(v) => onChange({ std_dev: v })} width="w-20" />
+          <Spinbox value={cond.std_dev ?? 2.0} min={0.5} max={5.0} step={0.1} float onChange={(v) => onChange({ std_dev: v })} width="w-20" />
         </Label>
       )}
 

@@ -636,19 +636,19 @@ function LabInner() {
                         </div>
                         {ind.type==="MACD" ? (
                           <div className="grid grid-cols-3 gap-1">
-                            {(["fast","slow","signal_period"] as const).map(k => (
+                            {([["fast",1,50],["slow",5,100],["signal_period",1,50]] as [keyof typeof ind, number, number][]).map(([k,mn,mx]) => (
                               <div key={k}>
                                 <div className={lCls}>{k==="signal_period"?"sig":k}</div>
-                                <Spinbox value={ind[k]} min={1} onChange={v => updateIndicator(ind.id,{[k]:v})} width="w-full" />
+                                <Spinbox value={ind[k] as number} min={mn} max={mx} onChange={v => updateIndicator(ind.id,{[k]:v})} width="w-full" />
                               </div>
                             ))}
                           </div>
                         ) : ind.type==="STOCH" ? (
                           <div className="grid grid-cols-3 gap-1">
-                            {(["period","k_smooth","d_period"] as const).map(k => (
+                            {([["period",1,100],["k_smooth",1,50],["d_period",1,50]] as [keyof typeof ind, number, number][]).map(([k,mn,mx]) => (
                               <div key={k}>
                                 <div className={lCls}>{k==="k_smooth"?"Ksm":k==="d_period"?"Dpr":"per"}</div>
-                                <Spinbox value={ind[k]} min={1} onChange={v => updateIndicator(ind.id,{[k]:v})} width="w-full" />
+                                <Spinbox value={ind[k] as number} min={mn} max={mx} onChange={v => updateIndicator(ind.id,{[k]:v})} width="w-full" />
                               </div>
                             ))}
                           </div>
@@ -656,17 +656,21 @@ function LabInner() {
                           <div className="flex gap-2">
                             <div className="flex-1">
                               <div className={lCls}>period</div>
-                              <Spinbox value={ind.period} min={2} onChange={v => updateIndicator(ind.id,{period:v})} width="w-full" />
+                              <Spinbox value={ind.period} min={5} max={100} onChange={v => updateIndicator(ind.id,{period:v})} width="w-full" />
                             </div>
                             <div className="flex-1">
                               <div className={lCls}>σ</div>
-                              <Spinbox value={ind.std_dev} min={0.1} step={0.1} float onChange={v => updateIndicator(ind.id,{std_dev:v})} width="w-full" />
+                              <Spinbox value={ind.std_dev} min={0.5} max={5.0} step={0.1} float onChange={v => updateIndicator(ind.id,{std_dev:v})} width="w-full" />
                             </div>
                           </div>
                         ) : (
                           <div>
                             <div className={lCls}>period</div>
-                            <Spinbox value={ind.period} min={1} onChange={v => updateIndicator(ind.id,{period:v})} width="w-24" />
+                            <Spinbox
+                              value={ind.period}
+                              min={(ind.type==="RSI"||ind.type==="ATR") ? 2 : 1}
+                              max={(ind.type==="EMA"||ind.type==="SMA") ? 999 : 100}
+                              onChange={v => updateIndicator(ind.id,{period:v})} width="w-24" />
                           </div>
                         )}
                       </div>
@@ -839,9 +843,9 @@ function LabInner() {
                 "text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 font-medium",
                 isActive ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700",
               ].join(" ");
-              const numInput = (val: number, onCh: (v: number) => void) => (
+              const numInput = (val: number, onCh: (v: number) => void, min = 1, max = 999) => (
                 <Spinbox
-                  value={val} min={1}
+                  value={val} min={min} max={max}
                   onChange={onCh}
                   onFocus={() => setActiveOsc(tab)}
                   onClick={e => e.stopPropagation()}
@@ -856,19 +860,19 @@ function LabInner() {
               return (
                 <div key={tab} className={`flex items-center gap-1 ${i > 0 ? "ml-2 pl-2 border-l border-zinc-700" : ""}`}>
                   <button onClick={() => setActiveOsc(tab)} className={btnCls}>{tab}</button>
-                  {tab === "RSI"   && numInput(ind.period,       v => updateIndicator(ind.id, {period:v}))}
+                  {tab === "RSI"   && numInput(ind.period,       v => updateIndicator(ind.id, {period:v}),           2,  100)}
                   {tab === "MACD"  && <div className="flex gap-1">
-                    {numInput(ind.fast,          v => updateIndicator(ind.id, {fast:v}))}
-                    {numInput(ind.slow,          v => updateIndicator(ind.id, {slow:v}))}
-                    {numInput(ind.signal_period, v => updateIndicator(ind.id, {signal_period:v}))}
+                    {numInput(ind.fast,          v => updateIndicator(ind.id, {fast:v}),          1,  50)}
+                    {numInput(ind.slow,          v => updateIndicator(ind.id, {slow:v}),          5, 100)}
+                    {numInput(ind.signal_period, v => updateIndicator(ind.id, {signal_period:v}), 1,  50)}
                   </div>}
-                  {tab === "ADX"   && numInput(ind.period,       v => updateIndicator(ind.id, {period:v}))}
+                  {tab === "ADX"   && numInput(ind.period,       v => updateIndicator(ind.id, {period:v}),           1, 100)}
                   {tab === "STOCH" && <div className="flex gap-1">
-                    {numInput(ind.period,   v => updateIndicator(ind.id, {period:v}))}
-                    {numInput(ind.k_smooth, v => updateIndicator(ind.id, {k_smooth:v}))}
-                    {numInput(ind.d_period, v => updateIndicator(ind.id, {d_period:v}))}
+                    {numInput(ind.period,   v => updateIndicator(ind.id, {period:v}),   1, 100)}
+                    {numInput(ind.k_smooth, v => updateIndicator(ind.id, {k_smooth:v}), 1,  50)}
+                    {numInput(ind.d_period, v => updateIndicator(ind.id, {d_period:v}), 1,  50)}
                   </div>}
-                  {tab === "ATR"   && numInput(ind.period,       v => updateIndicator(ind.id, {period:v}))}
+                  {tab === "ATR"   && numInput(ind.period,       v => updateIndicator(ind.id, {period:v}),           2, 100)}
                 </div>
               );
             })}

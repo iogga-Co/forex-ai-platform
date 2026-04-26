@@ -37,28 +37,32 @@ interface Strategy {
 // ---------------------------------------------------------------------------
 // IR param helpers
 // ---------------------------------------------------------------------------
-interface ParamDef { key: string; label: string; step: number; min: number; isInt?: boolean }
+interface ParamDef { key: string; label: string; step: number; min: number; max?: number; isInt?: boolean }
 
 function getConditionParams(cond: Record<string, unknown>): ParamDef[] {
   switch (cond.indicator as string) {
     case "MACD":
       return [
-        { key: "fast",          label: "fast", step: 1, min: 1, isInt: true },
-        { key: "slow",          label: "slow", step: 1, min: 1, isInt: true },
-        { key: "signal_period", label: "sig",  step: 1, min: 1, isInt: true },
+        { key: "fast",          label: "fast", step: 1, min: 1, max: 50,  isInt: true },
+        { key: "slow",          label: "slow", step: 1, min: 5, max: 100, isInt: true },
+        { key: "signal_period", label: "sig",  step: 1, min: 1, max: 50,  isInt: true },
       ];
     case "BB":
       return [
-        { key: "period",  label: "period", step: 1,   min: 2, isInt: true },
-        { key: "std_dev", label: "σ",      step: 0.1, min: 0.1 },
+        { key: "period",  label: "period", step: 1,   min: 5,   max: 100, isInt: true },
+        { key: "std_dev", label: "σ",      step: 0.1, min: 0.5, max: 5.0 },
       ];
     case "STOCH":
       return [
-        { key: "k_smooth", label: "K", step: 1, min: 1, isInt: true },
-        { key: "d_period", label: "D", step: 1, min: 1, isInt: true },
+        { key: "period",   label: "K",   step: 1, min: 1, max: 100, isInt: true },
+        { key: "k_smooth", label: "Ksm", step: 1, min: 1, max: 50,  isInt: true },
+        { key: "d_period", label: "D",   step: 1, min: 1, max: 50,  isInt: true },
       ];
     default: {
-      const params: ParamDef[] = [{ key: "period", label: "period", step: 1, min: 1, isInt: true }];
+      const ind = (cond.indicator as string)?.toUpperCase();
+      const max = (ind === "EMA" || ind === "SMA") ? 999 : 100;
+      const min = (ind === "RSI" || ind === "ATR") ? 2 : 1;
+      const params: ParamDef[] = [{ key: "period", label: "period", step: 1, min, max, isInt: true }];
       if ("value" in cond) params.push({ key: "value", label: "val", step: 0.1, min: 0 });
       return params;
     }
@@ -67,8 +71,8 @@ function getConditionParams(cond: Record<string, unknown>): ParamDef[] {
 
 function getExitParams(cond: Record<string, unknown>): ParamDef[] {
   if (cond.type === "atr") return [
-    { key: "period",     label: "period", step: 1,   min: 1, isInt: true },
-    { key: "multiplier", label: "mult",   step: 0.1, min: 0.1 },
+    { key: "period",     label: "period", step: 1,   min: 2,   max: 100, isInt: true },
+    { key: "multiplier", label: "mult",   step: 0.1, min: 0.5, max: 10.0 },
   ];
   return [{ key: "value", label: cond.type === "pct" ? "%" : "pips", step: cond.type === "pct" ? 0.1 : 1, min: 0.1 }];
 }
@@ -743,7 +747,7 @@ function OptimizationPageInner() {
                       {getConditionParams(cond).map((p) => (
                         <label key={p.key} className="flex items-center gap-0.5">
                           <span className="text-[10px] text-zinc-500 leading-none">{p.label}</span>
-                          <Spinbox step={p.step} min={p.min} value={Number(cond[p.key] ?? 0)}
+                          <Spinbox step={p.step} min={p.min} max={p.max} value={Number(cond[p.key] ?? 0)}
                             onChange={(v) => updateEntryParam(idx, p.key, v)}
                             float={!p.isInt} width="w-16" />
                         </label>
@@ -760,7 +764,7 @@ function OptimizationPageInner() {
                         {getExitParams(ec).map((p) => (
                           <label key={p.key} className="flex items-center gap-0.5">
                             <span className="text-[10px] text-zinc-500 leading-none">{p.label}</span>
-                            <Spinbox step={p.step} min={p.min} value={Number(ec[p.key] ?? 0)}
+                            <Spinbox step={p.step} min={p.min} max={p.max} value={Number(ec[p.key] ?? 0)}
                               onChange={(v) => updateExitParam(side, p.key, v)}
                               float={!p.isInt} width="w-16" />
                           </label>

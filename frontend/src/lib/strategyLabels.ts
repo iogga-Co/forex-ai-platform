@@ -131,7 +131,7 @@ export function exitConditionToLabel(
   ex: ExitCondition,
 ): string {
   if (ex.type === "atr")
-    return `${label}: ATR (${ex.period}) × ${ex.multiplier}`;
+    return `${label}: ATR (${ex.period}) × ${ex.multiplier?.toFixed(1)}`;
   if (ex.type === "fixed_pips")
     return `${label}: ${ex.pips} pips`;
   if (ex.type === "percent")
