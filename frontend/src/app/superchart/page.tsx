@@ -13,6 +13,7 @@ import {
 } from "lightweight-charts";
 import { fetchWithAuth } from "@/lib/auth";
 import DiagnosisPanel from "@/components/DiagnosisPanel";
+import Spinbox from "@/components/Spinbox";
 import {
   ema, sma, rsi, macd, bollingerBands, atr, adx, stochastic,
   toChartData, Series,
@@ -1061,32 +1062,34 @@ function SuperchartPageInner() {
               const isActive = activeOsc === tab;
               const inStrategy = oscillatorsInStrategy.includes(tab);
               const btnCls = [
-                "text-[10px] px-1.5 py-0.5 rounded-l transition-colors shrink-0 font-medium",
+                "text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 font-medium",
                 isActive ? "bg-blue-600 text-white" : inStrategy ? "bg-zinc-700 text-zinc-200 hover:bg-zinc-600" : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700",
               ].join(" ");
-              const inputCls = [
-                "bg-zinc-900 border-y text-[10px] text-zinc-300 text-center rounded-r focus:outline-none focus:border-blue-500 transition-colors",
-                isActive ? "border-blue-600" : "border-zinc-700",
-              ].join(" ");
-              const numInput = (val: number, onCh: (v: number) => void, w = "w-7") => (
-                <input
-                  type="number" value={val} min={1}
-                  onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 1) onCh(v); }}
+              const numInput = (val: number, onCh: (v: number) => void) => (
+                <Spinbox
+                  value={val} min={1}
+                  onChange={onCh}
                   onFocus={() => setActiveOsc(tab)}
                   onClick={(e) => e.stopPropagation()}
-                  className={`${inputCls} ${w} border-x-0 px-0.5 py-0.5`}
+                  active={isActive}
                 />
               );
               return (
-                <div key={tab} className={`flex items-center ${i > 0 ? "ml-2 pl-2 border-l border-zinc-700" : ""}`}>
+                <div key={tab} className={`flex items-center gap-1 ${i > 0 ? "ml-2 pl-2 border-l border-zinc-700" : ""}`}>
                   <button onClick={() => setActiveOsc(tab)} className={btnCls}>{tab}</button>
-                  <div className={`flex items-center border rounded-r overflow-hidden divide-x divide-zinc-700 ${isActive ? "border-blue-600" : "border-zinc-700"}`} style={{ borderLeft: "none" }}>
-                    {tab === "RSI"   && numInput(oscParams.RSI.period,           (v) => setOscParams((p) => ({ ...p, RSI: { period: v } })))}
-                    {tab === "MACD"  && <>{numInput(oscParams.MACD.fast,          (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, fast: v } })))}{numInput(oscParams.MACD.slow, (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, slow: v } })), "w-8")}{numInput(oscParams.MACD.signal_period, (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, signal_period: v } })))}</>}
-                    {tab === "ADX"   && numInput(oscParams.ADX.period,            (v) => setOscParams((p) => ({ ...p, ADX: { period: v } })))}
-                    {tab === "STOCH" && <>{numInput(oscParams.STOCH.period,       (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, period: v } })))}{numInput(oscParams.STOCH.k_smooth, (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, k_smooth: v } })))}{numInput(oscParams.STOCH.d_period, (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, d_period: v } })))}</>}
-                    {tab === "ATR"   && numInput(oscParams.ATR.period,            (v) => setOscParams((p) => ({ ...p, ATR: { period: v } })))}
-                  </div>
+                  {tab === "RSI"   && numInput(oscParams.RSI.period,           (v) => setOscParams((p) => ({ ...p, RSI: { period: v } })))}
+                  {tab === "MACD"  && <div className="flex gap-1">
+                    {numInput(oscParams.MACD.fast,          (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, fast: v } })))}
+                    {numInput(oscParams.MACD.slow,          (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, slow: v } })))}
+                    {numInput(oscParams.MACD.signal_period, (v) => setOscParams((p) => ({ ...p, MACD: { ...p.MACD, signal_period: v } })))}
+                  </div>}
+                  {tab === "ADX"   && numInput(oscParams.ADX.period,            (v) => setOscParams((p) => ({ ...p, ADX: { period: v } })))}
+                  {tab === "STOCH" && <div className="flex gap-1">
+                    {numInput(oscParams.STOCH.period,   (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, period: v } })))}
+                    {numInput(oscParams.STOCH.k_smooth, (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, k_smooth: v } })))}
+                    {numInput(oscParams.STOCH.d_period, (v) => setOscParams((p) => ({ ...p, STOCH: { ...p.STOCH, d_period: v } })))}
+                  </div>}
+                  {tab === "ATR"   && numInput(oscParams.ATR.period,            (v) => setOscParams((p) => ({ ...p, ATR: { period: v } })))}
                 </div>
               );
             })}
@@ -1208,19 +1211,11 @@ function SuperchartPageInner() {
                     {ov.type !== "MACD" && ov.type !== "STOCH" && (
                       <div className="flex items-center gap-2">
                         <label className="text-[10px] text-zinc-500 w-10 shrink-0">Period</label>
-                        <input
-                          type="number" min={2} value={ov.period}
-                          onChange={(e) => updateOverlay(ov.id, { period: Math.max(2, parseInt(e.target.value) || 2) })}
-                          className="w-14 bg-zinc-900 border border-zinc-600 rounded px-1.5 py-0.5 text-xs text-zinc-200"
-                        />
+                        <Spinbox value={ov.period} min={2} onChange={(v) => updateOverlay(ov.id, { period: v })} width="w-16" />
                         {ov.type === "BB" && (
                           <>
                             <label className="text-[10px] text-zinc-500 shrink-0">σ</label>
-                            <input
-                              type="number" min={0.1} step={0.1} value={ov.std_dev}
-                              onChange={(e) => updateOverlay(ov.id, { std_dev: Math.max(0.1, parseFloat(e.target.value) || 2) })}
-                              className="w-12 bg-zinc-900 border border-zinc-600 rounded px-1.5 py-0.5 text-xs text-zinc-200"
-                            />
+                            <Spinbox value={ov.std_dev} min={0.1} step={0.1} float onChange={(v) => updateOverlay(ov.id, { std_dev: v })} width="w-16" />
                           </>
                         )}
                       </div>
@@ -1230,11 +1225,7 @@ function SuperchartPageInner() {
                         {([["Fast", "fast", ov.fast], ["Slow", "slow", ov.slow], ["Sig", "signal_period", ov.signal_period]] as [string, keyof ChartOverlay, number][]).map(([lbl, key, val]) => (
                           <div key={key}>
                             <label className="text-[10px] text-zinc-500 block">{lbl}</label>
-                            <input
-                              type="number" min={1} value={val}
-                              onChange={(e) => updateOverlay(ov.id, { [key]: Math.max(1, parseInt(e.target.value) || 1) })}
-                              className="w-full bg-zinc-900 border border-zinc-600 rounded px-1 py-0.5 text-xs text-zinc-200"
-                            />
+                            <Spinbox value={val} min={1} onChange={(v) => updateOverlay(ov.id, { [key]: v })} width="w-full" />
                           </div>
                         ))}
                       </div>
@@ -1244,11 +1235,7 @@ function SuperchartPageInner() {
                         {([["K Prd", "period", ov.period], ["K Sm", "k_smooth", ov.k_smooth], ["D Prd", "d_period", ov.d_period]] as [string, keyof ChartOverlay, number][]).map(([lbl, key, val]) => (
                           <div key={key}>
                             <label className="text-[10px] text-zinc-500 block">{lbl}</label>
-                            <input
-                              type="number" min={1} value={val}
-                              onChange={(e) => updateOverlay(ov.id, { [key]: Math.max(1, parseInt(e.target.value) || 1) })}
-                              className="w-full bg-zinc-900 border border-zinc-600 rounded px-1 py-0.5 text-xs text-zinc-200"
-                            />
+                            <Spinbox value={val} min={1} onChange={(v) => updateOverlay(ov.id, { [key]: v })} width="w-full" />
                           </div>
                         ))}
                       </div>
@@ -1409,25 +1396,20 @@ function ConditionEditor({
 
       {/* Period */}
       <Label label="Period">
-        <NumberInput
-          value={cond.period}
-          min={2}
-          max={500}
-          onChange={(v) => onChange({ period: v })}
-        />
+        <Spinbox value={cond.period ?? 14} min={2} max={500} onChange={(v) => onChange({ period: v })} width="w-20" />
       </Label>
 
       {/* MACD fast/slow/signal */}
       {ind === "MACD" && (
         <>
           <Label label="Fast">
-            <NumberInput value={cond.fast ?? 12} min={2} max={200} onChange={(v) => onChange({ fast: v })} />
+            <Spinbox value={cond.fast ?? 12} min={2} max={200} onChange={(v) => onChange({ fast: v })} width="w-20" />
           </Label>
           <Label label="Slow">
-            <NumberInput value={cond.slow ?? 26} min={2} max={500} onChange={(v) => onChange({ slow: v })} />
+            <Spinbox value={cond.slow ?? 26} min={2} max={500} onChange={(v) => onChange({ slow: v })} width="w-20" />
           </Label>
           <Label label="Signal">
-            <NumberInput value={cond.signal_period ?? 9} min={2} max={100} onChange={(v) => onChange({ signal_period: v })} />
+            <Spinbox value={cond.signal_period ?? 9} min={2} max={100} onChange={(v) => onChange({ signal_period: v })} width="w-20" />
           </Label>
         </>
       )}
@@ -1435,15 +1417,7 @@ function ConditionEditor({
       {/* BB std_dev */}
       {ind === "BB" && (
         <Label label="Std Dev">
-          <input
-            type="number"
-            value={cond.std_dev ?? 2.0}
-            step={0.1}
-            min={0.5}
-            max={5}
-            onChange={(e) => onChange({ std_dev: parseFloat(e.target.value) })}
-            className="w-20 bg-zinc-700 rounded px-1.5 py-0.5 text-zinc-200 text-right"
-          />
+          <Spinbox value={cond.std_dev ?? 2.0} min={0.5} max={5} step={0.1} float onChange={(v) => onChange({ std_dev: v })} width="w-20" />
         </Label>
       )}
 
@@ -1451,10 +1425,10 @@ function ConditionEditor({
       {ind === "STOCH" && (
         <>
           <Label label="K Smooth">
-            <NumberInput value={cond.k_smooth ?? 3} min={1} max={50} onChange={(v) => onChange({ k_smooth: v })} />
+            <Spinbox value={cond.k_smooth ?? 3} min={1} max={50} onChange={(v) => onChange({ k_smooth: v })} width="w-20" />
           </Label>
           <Label label="D Period">
-            <NumberInput value={cond.d_period ?? 3} min={1} max={50} onChange={(v) => onChange({ d_period: v })} />
+            <Spinbox value={cond.d_period ?? 3} min={1} max={50} onChange={(v) => onChange({ d_period: v })} width="w-20" />
           </Label>
         </>
       )}
@@ -1497,28 +1471,3 @@ function Label({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function NumberInput({
-  value,
-  min,
-  max,
-  onChange,
-}: {
-  value: number;
-  min: number;
-  max: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <input
-      type="number"
-      value={value}
-      min={min}
-      max={max}
-      onChange={(e) => {
-        const v = parseInt(e.target.value, 10);
-        if (!isNaN(v) && v >= min && v <= max) onChange(v);
-      }}
-      className="w-20 bg-zinc-700 rounded px-1.5 py-0.5 text-zinc-200 text-right"
-    />
-  );
-}

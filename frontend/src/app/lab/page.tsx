@@ -7,6 +7,7 @@ import {
   LineStyle, LineWidth, Time,
 } from "lightweight-charts";
 import { fetchWithAuth } from "@/lib/auth";
+import Spinbox from "@/components/Spinbox";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,8 +58,7 @@ const DEFAULTS: Record<IndType, Partial<LabIndicator>> = {
   ADX:{period:14}, STOCH:{period:14,k_smooth:3,d_period:3}, ATR:{period:14},
 };
 
-let _uid = 0;
-const uid = () => `i${++_uid}`;
+const uid = () => crypto.randomUUID();
 
 function defaultFrom() {
   const d = new Date(); d.setFullYear(d.getFullYear()-1); return d.toISOString().slice(0,10);
@@ -142,16 +142,17 @@ function LabInner() {
   const [exporting, setExporting] = useState(false);
 
   // Chart refs
-  const mainDivRef    = useRef<HTMLDivElement>(null);
-  const subDivRef     = useRef<HTMLDivElement>(null);
-  const mainChart     = useRef<IChartApi|null>(null);
-  const subChart      = useRef<IChartApi|null>(null);
-  const candleSeries  = useRef<ISeriesApi<"Candlestick">|null>(null);
-  const overlayRefs   = useRef<ISeriesApi<"Line">[]>([]);
-  const subRefs       = useRef<ISeriesApi<"Line"|"Histogram">[]>([]);
-  const libRefs       = useRef<ISeriesApi<"Line">[]>([]);
-  const syncingRef    = useRef(false);
-  const recomputeTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const mainDivRef      = useRef<HTMLDivElement>(null);
+  const subDivRef       = useRef<HTMLDivElement>(null);
+  const mainChart       = useRef<IChartApi|null>(null);
+  const subChart        = useRef<IChartApi|null>(null);
+  const candleSeries    = useRef<ISeriesApi<"Candlestick">|null>(null);
+  const overlayRefs     = useRef<ISeriesApi<"Line">[]>([]);
+  const subRefs         = useRef<ISeriesApi<"Line"|"Histogram">[]>([]);
+  const libRefs         = useRef<ISeriesApi<"Line">[]>([]);
+  const syncingRef      = useRef(false);
+  const crosshairSync   = useRef(false);
+  const recomputeTimer  = useRef<ReturnType<typeof setTimeout>|null>(null);
 
   // ---------------------------------------------------------------------------
   // Init charts
@@ -178,6 +179,23 @@ function LabInner() {
       syncingRef.current = true;
       try { main.timeScale().setVisibleRange(range); } catch {}
       syncingRef.current = false;
+    });
+
+    // Crosshair sync between main and sub charts
+    main.subscribeCrosshairMove(param => {
+      if (crosshairSync.current) return;
+      crosshairSync.current = true;
+      const first = subRefs.current[0];
+      if (!param.time || !first) { sub.clearCrosshairPosition(); }
+      else { sub.setCrosshairPosition(NaN, param.time, first); }
+      crosshairSync.current = false;
+    });
+    sub.subscribeCrosshairMove(param => {
+      if (crosshairSync.current) return;
+      crosshairSync.current = true;
+      if (!param.time || !cs) { main.clearCrosshairPosition(); }
+      else { main.setCrosshairPosition(NaN, param.time, cs); }
+      crosshairSync.current = false;
     });
 
     const ro = new ResizeObserver(() => {
@@ -620,9 +638,7 @@ function LabInner() {
                             {(["fast","slow","signal_period"] as const).map(k => (
                               <div key={k}>
                                 <div className={lCls}>{k==="signal_period"?"sig":k}</div>
-                                <input type="number" min={1} value={ind[k]}
-                                  onChange={e => updateIndicator(ind.id,{[k]:Math.max(1,parseInt(e.target.value)||1)})}
-                                  className={`${iCls} w-full`} />
+                                <Spinbox value={ind[k]} min={1} onChange={v => updateIndicator(ind.id,{[k]:v})} width="w-full" />
                               </div>
                             ))}
                           </div>
@@ -631,9 +647,7 @@ function LabInner() {
                             {(["period","k_smooth","d_period"] as const).map(k => (
                               <div key={k}>
                                 <div className={lCls}>{k==="k_smooth"?"Ksm":k==="d_period"?"Dpr":"per"}</div>
-                                <input type="number" min={1} value={ind[k]}
-                                  onChange={e => updateIndicator(ind.id,{[k]:Math.max(1,parseInt(e.target.value)||1)})}
-                                  className={`${iCls} w-full`} />
+                                <Spinbox value={ind[k]} min={1} onChange={v => updateIndicator(ind.id,{[k]:v})} width="w-full" />
                               </div>
                             ))}
                           </div>
@@ -641,23 +655,17 @@ function LabInner() {
                           <div className="flex gap-2">
                             <div className="flex-1">
                               <div className={lCls}>period</div>
-                              <input type="number" min={2} value={ind.period}
-                                onChange={e => updateIndicator(ind.id,{period:Math.max(2,parseInt(e.target.value)||2)})}
-                                className={`${iCls} w-full`} />
+                              <Spinbox value={ind.period} min={2} onChange={v => updateIndicator(ind.id,{period:v})} width="w-full" />
                             </div>
                             <div className="flex-1">
                               <div className={lCls}>σ</div>
-                              <input type="number" min={0.1} step={0.1} value={ind.std_dev}
-                                onChange={e => updateIndicator(ind.id,{std_dev:Math.max(0.1,parseFloat(e.target.value)||2)})}
-                                className={`${iCls} w-full`} />
+                              <Spinbox value={ind.std_dev} min={0.1} step={0.1} float onChange={v => updateIndicator(ind.id,{std_dev:v})} width="w-full" />
                             </div>
                           </div>
                         ) : (
                           <div>
                             <div className={lCls}>period</div>
-                            <input type="number" min={1} value={ind.period}
-                              onChange={e => updateIndicator(ind.id,{period:Math.max(1,parseInt(e.target.value)||1)})}
-                              className={`${iCls} w-24`} />
+                            <Spinbox value={ind.period} min={1} onChange={v => updateIndicator(ind.id,{period:v})} width="w-24" />
                           </div>
                         )}
                       </div>
@@ -683,9 +691,7 @@ function LabInner() {
                   </div>
                   <div className="flex gap-1 items-center">
                     <span className={`${lCls} shrink-0`}>per</span>
-                    <input type="number" min={1} value={newCondPer}
-                      onChange={e => setNewCondPer(Math.max(1,parseInt(e.target.value)||1))}
-                      className={`${iCls} w-12`} />
+                    <Spinbox value={newCondPer} min={1} onChange={v => setNewCondPer(v)} width="w-12" />
                     {[">" ,"<"].includes(newCondOp) && <>
                       <span className={`${lCls} shrink-0`}>val</span>
                       <input type="number" value={newCondVal}
@@ -820,22 +826,52 @@ function LabInner() {
         {/* Chart column */}
         <div className="flex flex-col flex-1 overflow-hidden">
           <div ref={mainDivRef} className="flex-1" style={{minHeight:0}} />
-          <div ref={subDivRef}  className="shrink-0" style={{height:150}} />
+          <div ref={subDivRef}  className="flex-shrink-0" style={{height:160}} />
 
-          {uniqueOscTypes.length > 0 && (
-            <div className="flex items-center gap-1 px-2 py-1 border-t border-zinc-800 bg-zinc-900 shrink-0">
-              <span className={`${lCls} mr-1`}>OSC</span>
-              {uniqueOscTypes.map(tab => (
-                <button key={tab} onClick={() => setActiveOsc(tab as OscTab)}
-                  className={[
-                    "text-[10px] px-2 py-0.5 rounded transition-colors",
-                    activeOsc===tab ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700",
-                  ].join(" ")}>
-                  {tab}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* OSC tab bar — inline editable params, matches Superchart style */}
+          <div className="flex items-center gap-0 px-2 py-1 border-t border-zinc-800 bg-zinc-900 shrink-0 overflow-x-auto">
+            <span className="text-[10px] text-zinc-600 mr-2 shrink-0">OSC</span>
+            {uniqueOscTypes.map((tab, i) => {
+              const isActive = activeOsc === tab;
+              const ind = indicators.find(x => x.type === tab);
+              const btnCls = [
+                "text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 font-medium",
+                isActive ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700",
+              ].join(" ");
+              const numInput = (val: number, onCh: (v: number) => void) => (
+                <Spinbox
+                  value={val} min={1}
+                  onChange={onCh}
+                  onFocus={() => setActiveOsc(tab)}
+                  onClick={e => e.stopPropagation()}
+                  active={isActive}
+                />
+              );
+              if (!ind) return (
+                <div key={tab} className={`flex items-center gap-1 ${i > 0 ? "ml-2 pl-2 border-l border-zinc-700" : ""}`}>
+                  <button onClick={() => setActiveOsc(tab)} className={btnCls}>{tab}</button>
+                </div>
+              );
+              return (
+                <div key={tab} className={`flex items-center gap-1 ${i > 0 ? "ml-2 pl-2 border-l border-zinc-700" : ""}`}>
+                  <button onClick={() => setActiveOsc(tab)} className={btnCls}>{tab}</button>
+                  {tab === "RSI"   && numInput(ind.period,       v => updateIndicator(ind.id, {period:v}))}
+                  {tab === "MACD"  && <div className="flex gap-1">
+                    {numInput(ind.fast,          v => updateIndicator(ind.id, {fast:v}))}
+                    {numInput(ind.slow,          v => updateIndicator(ind.id, {slow:v}))}
+                    {numInput(ind.signal_period, v => updateIndicator(ind.id, {signal_period:v}))}
+                  </div>}
+                  {tab === "ADX"   && numInput(ind.period,       v => updateIndicator(ind.id, {period:v}))}
+                  {tab === "STOCH" && <div className="flex gap-1">
+                    {numInput(ind.period,   v => updateIndicator(ind.id, {period:v}))}
+                    {numInput(ind.k_smooth, v => updateIndicator(ind.id, {k_smooth:v}))}
+                    {numInput(ind.d_period, v => updateIndicator(ind.id, {d_period:v}))}
+                  </div>}
+                  {tab === "ATR"   && numInput(ind.period,       v => updateIndicator(ind.id, {period:v}))}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

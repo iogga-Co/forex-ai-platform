@@ -8,6 +8,7 @@ import BacktestResultPanel from "@/components/BacktestResultPanel";
 import DiagnosisSidebar from "@/components/DiagnosisSidebar";
 import { loadSettings } from "@/lib/settings";
 import type { StrategyIR } from "@/lib/irPatch";
+import Spinbox from "@/components/Spinbox";
 
 interface Strategy {
   id: string;
@@ -357,7 +358,6 @@ function BacktestPageInner() {
               const entryConds = (editedIr.entry_conditions as Record<string, unknown>[]) ?? [];
               const exitConds  = editedIr.exit_conditions as Record<string, Record<string, unknown>> | undefined;
               const sizing     = editedIr.position_sizing as Record<string, unknown> | undefined;
-              const inputCls   = "w-14 bg-zinc-700 border border-zinc-600 rounded px-1 py-0.5 text-xs text-zinc-200 text-right";
               return (
                 <div className="rounded border border-zinc-700 bg-zinc-800/50 p-2 space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -378,9 +378,9 @@ function BacktestPageInner() {
                       {getConditionParams(cond).map((p) => (
                         <label key={p.key} className="flex items-center gap-0.5">
                           <span className="text-[10px] text-zinc-500">{p.label}</span>
-                          <input type="number" step={p.step} min={p.min} value={Number(cond[p.key] ?? 0)}
-                            onChange={(e) => updateEntryParam(idx, p.key, p.isInt ? parseInt(e.target.value, 10) : parseFloat(e.target.value))}
-                            className={inputCls} />
+                          <Spinbox step={p.step} min={p.min} value={Number(cond[p.key] ?? 0)}
+                            onChange={(v) => updateEntryParam(idx, p.key, v)}
+                            float={!p.isInt} width="w-16" />
                         </label>
                       ))}
                     </div>
@@ -395,9 +395,9 @@ function BacktestPageInner() {
                         {getExitParams(ec).map((p) => (
                           <label key={p.key} className="flex items-center gap-0.5">
                             <span className="text-[10px] text-zinc-500">{p.label}</span>
-                            <input type="number" step={p.step} min={p.min} value={Number(ec[p.key] ?? 0)}
-                              onChange={(e) => updateExitParam(side, p.key, p.isInt ? parseInt(e.target.value, 10) : parseFloat(e.target.value))}
-                              className={inputCls} />
+                            <Spinbox step={p.step} min={p.min} value={Number(ec[p.key] ?? 0)}
+                              onChange={(v) => updateExitParam(side, p.key, v)}
+                              float={!p.isInt} width="w-16" />
                           </label>
                         ))}
                       </div>
@@ -408,15 +408,13 @@ function BacktestPageInner() {
                       <span className="text-[10px] text-zinc-300 w-10 shrink-0">Size</span>
                       <label className="flex items-center gap-0.5">
                         <span className="text-[10px] text-zinc-500">risk%</span>
-                        <input type="number" step={0.1} min={0.1} value={Number(sizing.risk_per_trade_pct ?? 1)}
-                          onChange={(e) => updateSizingParam("risk_per_trade_pct", parseFloat(e.target.value))}
-                          className={inputCls} />
+                        <Spinbox step={0.1} min={0.1} value={Number(sizing.risk_per_trade_pct ?? 1)}
+                          onChange={(v) => updateSizingParam("risk_per_trade_pct", v)} float width="w-16" />
                       </label>
                       <label className="flex items-center gap-0.5">
                         <span className="text-[10px] text-zinc-500">max</span>
-                        <input type="number" step={1000} min={1000} value={Number(sizing.max_size_units ?? 100000)}
-                          onChange={(e) => updateSizingParam("max_size_units", parseInt(e.target.value, 10))}
-                          className="w-20 bg-zinc-700 border border-zinc-600 rounded px-1 py-0.5 text-xs text-zinc-200 text-right" />
+                        <Spinbox step={1000} min={1000} value={Number(sizing.max_size_units ?? 100000)}
+                          onChange={(v) => updateSizingParam("max_size_units", v)} width="w-20" />
                       </label>
                     </div>
                   )}
