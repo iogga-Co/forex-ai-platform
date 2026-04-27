@@ -3,6 +3,8 @@
 Derived from the Gemini audit (April 2026), Suggestions.md, and architectural review.
 Items are ordered by priority within each phase. Severities from the audit are noted where applicable.
 
+**Status as of 2026-04-27:** Phases 5.0, 5.1, and 5.2 are complete. Phase 5.3 and 5.4 are pending.
+
 ---
 
 ## Phase 5.0 — Live Trading Hardening (Pre-Capital Gate)
@@ -21,13 +23,13 @@ in the signal payload. If the real ATR is 10× higher, position sizing will be 1
 over-leveraged — an account-ruin risk.
 
 **Tasks:**
-- [ ] Extend the signal payload in `live/engine.py` to include the computed ATR value
+- [x] Extend the signal payload in `live/engine.py` to include the computed ATR value
       for the SL indicator period (already calculated during bar check — just add to the
       `dict` passed to `_publish_signal`)
-- [ ] In `executor.py`, read `atr_value` from the incoming signal dict
-- [ ] Add a hard abort: if `atr_value` is missing or `<= 0`, log a critical error and
+- [x] In `executor.py`, read `atr_value` from the incoming signal dict
+- [x] Add a hard abort: if `atr_value` is missing or `<= 0`, log a critical error and
       **skip order placement entirely** — do not fall back to any hardcoded value
-- [ ] Add a unit test covering the abort path (signal with no ATR → no order submitted)
+- [x] Add a unit test covering the abort path (signal with no ATR → no order submitted)
 
 ---
 
@@ -40,14 +42,14 @@ SL/TP, the `live_orders` table stays in `filled` state permanently. The kill-swi
 count and P&L calculations are then wrong for the rest of the session.
 
 **Tasks:**
-- [ ] Implement `_reconcile_on_startup(r, pool)` in `executor.py`:
+- [x] Implement `_reconcile_on_startup(r, pool)` in `executor.py`:
   - Fetch all `live_orders` rows with `status = 'filled'`
   - For each, call `OandaClient.get_trade(trade_id)` to check current state
   - If OANDA reports the trade as closed, update the DB row to `status = 'closed'`
     and record `exit_price`, `exit_time`, `pnl` from the OANDA response
-- [ ] Call `_reconcile_on_startup()` at the top of `executor.run()` before the
+- [x] Call `_reconcile_on_startup()` at the top of `executor.run()` before the
       main subscription loop starts
-- [ ] Log a summary: `"Reconciled N stale positions on startup"`
+- [x] Log a summary: `"Reconciled N stale positions on startup"`
 
 ---
 
@@ -60,7 +62,7 @@ count and P&L calculations are then wrong for the rest of the session.
 two places.
 
 **Tasks:**
-- [ ] Create `backend/core/instruments.py` with a `PIP_SIZES` dict:
+- [x] Create `backend/core/instruments.py` with a `PIP_SIZES` dict:
   ```python
   PIP_SIZES = {
       "EURUSD": 0.0001, "GBPUSD": 0.0001, "USDCHF": 0.0001,
@@ -70,9 +72,9 @@ two places.
   def get_pip_size(symbol: str) -> float:
       return PIP_SIZES.get(symbol.replace("/", "").upper(), 0.0001)
   ```
-- [ ] Replace the `"JPY" in self._symbol` check in `parser.py` with `get_pip_size()`
-- [ ] Replace the same pattern in `executor.py` with `get_pip_size()`
-- [ ] (Optional) On startup, call `GET /v3/instruments` from OANDA and validate/update
+- [x] Replace the `"JPY" in self._symbol` check in `parser.py` with `get_pip_size()`
+- [x] Replace the same pattern in `executor.py` with `get_pip_size()`
+- [x] (Optional) On startup, call `GET /v3/instruments` from OANDA and validate/update
       `PIP_SIZES` against `pipLocation` — store as runtime override
 
 ---
@@ -85,15 +87,15 @@ two places.
 Vulnerable to brute-force; high stakes once real capital is involved.
 
 **Tasks:**
-- [ ] Add TOTP-based MFA using `pyotp`:
+- [x] Add TOTP-based MFA using `pyotp`:
   - New DB column: `users.totp_secret VARCHAR(32)` (nullable — only set for operator)
   - New endpoint `POST /api/auth/mfa/setup` — generates and returns a TOTP secret +
     QR code URI for the operator account; stores secret on confirmation
   - New endpoint `POST /api/auth/mfa/verify` — accepts TOTP code, issues a
     short-lived `mfa_token` (15-min JWT) alongside the regular access token
-- [ ] Add `require_mfa` dependency for kill-switch and any order-placement endpoints
+- [x] Add `require_mfa` dependency for kill-switch and any order-placement endpoints
       in `routers/trading.py` — checks for valid `mfa_token` in request headers
-- [ ] Frontend: add MFA setup flow in Settings page; add TOTP prompt before
+- [x] Frontend: add MFA setup flow in Settings page; add TOTP prompt before
       kill-switch confirmation dialog
 
 ---
@@ -116,7 +118,7 @@ the kill-switch endpoint.
 ### 5.1.1 — Trading Service Entry Point
 
 **Tasks:**
-- [ ] Create `backend/trading_service.py` — standalone asyncio entry point:
+- [x] Create `backend/trading_service.py` — standalone asyncio entry point:
   ```python
   async def main():
       pool = await create_db_pool()
@@ -127,8 +129,8 @@ the kill-switch endpoint.
           run_executor(stop, pool),   # new signature — pool passed in
       )
   ```
-- [ ] Add `asyncio.signal` handlers for `SIGTERM`/`SIGINT` that set `stop`
-- [ ] Verify `executor.py` can accept an externally-created pool (refactor
+- [x] Add `asyncio.signal` handlers for `SIGTERM`/`SIGINT` that set `stop`
+- [x] Verify `executor.py` can accept an externally-created pool (refactor
       `LiveExecutor.__init__` to take `pool` as a parameter)
 
 ---
@@ -139,17 +141,17 @@ the kill-switch endpoint.
 (in-process). After decomposition the executor is in another process.
 
 **Tasks:**
-- [ ] Define a Redis command channel `live:commands` with a JSON envelope:
+- [x] Define a Redis command channel `live:commands` with a JSON envelope:
   ```json
   { "cmd": "kill_switch", "request_id": "<uuid>", "user_id": "<uid>" }
   ```
-- [ ] In `executor.py`, add a coroutine that subscribes to `live:commands`
+- [x] In `executor.py`, add a coroutine that subscribes to `live:commands`
       and dispatches to `self.kill_switch()` on receipt; publishes result to
       `live:cmd_results:{request_id}`
-- [ ] In `routers/trading.py`, replace the direct `executor.kill_switch()` call
+- [x] In `routers/trading.py`, replace the direct `executor.kill_switch()` call
       with a publish to `live:commands` + a `blpop` wait on `live:cmd_results:{id}`
       with a 10-second timeout
-- [ ] For `GET /api/trading/status` — open position count can be read directly from
+- [x] For `GET /api/trading/status` — open position count can be read directly from
       DB; remove the `get_executor()` call entirely (it only uses DB currently)
 
 ---
@@ -157,11 +159,11 @@ the kill-switch endpoint.
 ### 5.1.3 — Strip Lifespan Tasks from FastAPI
 
 **Tasks:**
-- [ ] Remove `run_feed`, `run_engine`, `LiveExecutor` imports and task creation from
+- [x] Remove `run_feed`, `run_engine`, `LiveExecutor` imports and task creation from
       `backend/main.py` lifespan
-- [ ] Remove `get_executor` / `set_executor` singleton from `live/executor.py` (no
+- [x] Remove `get_executor` / `set_executor` singleton from `live/executor.py` (no
       longer needed — executor runs in its own process)
-- [ ] Keep the Redis bridge task (WebSocket ping) in FastAPI lifespan — it belongs
+- [x] Keep the Redis bridge task (WebSocket ping) in FastAPI lifespan — it belongs
       to the web layer
 
 ---
@@ -169,7 +171,7 @@ the kill-switch endpoint.
 ### 5.1.4 — Docker Compose Service
 
 **Tasks:**
-- [ ] Add `trading-service` to `docker-compose.yml`:
+- [x] Add `trading-service` to `docker-compose.yml`:
   ```yaml
   trading-service:
     build: ./backend
@@ -177,10 +179,10 @@ the kill-switch endpoint.
     depends_on: [timescaledb, redis]
     restart: unless-stopped
   ```
-- [ ] Add to `docker-compose.dev.yml`: bind mount + env vars for hot reload
-- [ ] Update CI deploy script: include `trading-service` in the recreate sequence
+- [x] Add to `docker-compose.dev.yml`: bind mount + env vars for hot reload
+- [x] Update CI deploy script: include `trading-service` in the recreate sequence
       (after `fastapi celery`, before `nextjs`)
-- [ ] Update `CLAUDE.md` restart instructions: add
+- [x] Update `CLAUDE.md` restart instructions: add
       `docker compose restart trading-service` for `live/` code changes
 
 ---
@@ -188,10 +190,10 @@ the kill-switch endpoint.
 ### 5.1.5 — Health Check Endpoint
 
 **Tasks:**
-- [ ] Add a lightweight HTTP health check to `trading_service.py` (a single-route
+- [x] Add a lightweight HTTP health check to `trading_service.py` (a single-route
       FastAPI app on port 8001, or just write a Redis key `live:heartbeat` every 30s)
-- [ ] Docker Compose `healthcheck` reads the Redis key or pings the port
-- [ ] Staging: confirm Nginx does NOT proxy port 8001 (internal only)
+- [x] Docker Compose `healthcheck` reads the Redis key or pings the port
+- [x] Staging: confirm Nginx does NOT proxy port 8001 (internal only)
 
 ---
 
@@ -207,11 +209,11 @@ These are independent of the above and can be done in any order.
 browser `alert()` or are silent.
 
 **Tasks:**
-- [ ] Install `sonner` (`npm install sonner`)
-- [ ] Add `<Toaster />` to `frontend/src/app/layout.tsx`
-- [ ] Replace all `alert()` calls and silent completions with `toast.success()` /
+- [x] Install `sonner` (`npm install sonner`)
+- [x] Add `<Toaster />` to `frontend/src/app/layout.tsx`
+- [x] Replace all `alert()` calls and silent completions with `toast.success()` /
       `toast.error()` across backtest, optimization, and g-optimize pages
-- [ ] On SSE `done` events from optimization/g-optimize streams, fire a toast if the
+- [x] On SSE `done` events from optimization/g-optimize streams, fire a toast if the
       tab is in the background
 
 ---
@@ -224,9 +226,9 @@ browser `alert()` or are silent.
 heartbeats may cause the reconnect logic to misidentify silent drops.
 
 **Tasks:**
-- [ ] In `feed.py`, explicitly detect `"type": "HEARTBEAT"` in the OANDA stream
+- [x] In `feed.py`, explicitly detect `"type": "HEARTBEAT"` in the OANDA stream
       response and update a `last_heartbeat_at` timestamp (no other action needed)
-- [ ] If no heartbeat received within 30s, log a warning and trigger reconnect
+- [x] If no heartbeat received within 30s, log a warning and trigger reconnect
 
 ---
 
@@ -235,9 +237,9 @@ heartbeats may cause the reconnect logic to misidentify silent drops.
 **File:** `backend/main.py` lifespan teardown
 
 **Tasks:**
-- [ ] Wrap each `await _task` in the lifespan shutdown with
+- [x] Wrap each `await _task` in the lifespan shutdown with
       `asyncio.wait_for(..., timeout=10.0)`
-- [ ] On `asyncio.TimeoutError`, log a warning and `task.cancel()` — prevents zombie
+- [x] On `asyncio.TimeoutError`, log a warning and `task.cancel()` — prevents zombie
       processes blocking deployment restarts
 
 ---
@@ -247,10 +249,10 @@ heartbeats may cause the reconnect logic to misidentify silent drops.
 **File:** `frontend/src/components/BacktestResultPanel.tsx`
 
 **Tasks:**
-- [ ] Add a `Tooltip` component (inline CSS, no new dependency) with definitions for:
+- [x] Add a `Tooltip` component (inline CSS, no new dependency) with definitions for:
       Sharpe Ratio, Profit Factor, Max Drawdown, R-Multiple, Win Rate
-- [ ] Wrap each metric label with the tooltip — hover shows definition
-- [ ] Keep tooltip text concise (1 sentence)
+- [x] Wrap each metric label with the tooltip — hover shows definition
+- [x] Keep tooltip text concise (1 sentence)
 
 ---
 
@@ -262,10 +264,10 @@ heartbeats may cause the reconnect logic to misidentify silent drops.
 if the backend is restarting.
 
 **Tasks:**
-- [ ] Replace raw `new EventSource(url)` with a thin wrapper that:
+- [x] Replace raw `new EventSource(url)` with a thin wrapper that:
   - On `onerror`, waits `min(2^attempt × 1000ms, 30000ms)` before reconnecting
   - Resets backoff counter on `onopen`
-- [ ] Apply to `optimization/page.tsx` and `g-optimize/page.tsx` SSE connections
+- [x] Apply to `optimization/page.tsx` and `g-optimize/page.tsx` SSE connections
 
 ---
 
@@ -274,10 +276,10 @@ if the backend is restarting.
 **File:** `backend/scripts/backfill.py`, `backend/data/quality.py`
 
 **Tasks:**
-- [ ] After each pair's ingest in `backfill.py`, call the quality check functions
+- [x] After each pair's ingest in `backfill.py`, call the quality check functions
       from `data/quality.py` on the newly loaded range
-- [ ] Log a summary per pair: rows loaded, gaps detected, rows skipped
-- [ ] On `--strict` flag, abort the backfill if quality checks fail
+- [x] Log a summary per pair: rows loaded, gaps detected, rows skipped
+- [x] On `--strict` flag, abort the backfill if quality checks fail
 
 ---
 
@@ -289,9 +291,9 @@ if the backend is restarting.
 relationship between account growth and risk periods.
 
 **Tasks:**
-- [ ] Combine into a single Recharts chart with two Y-axes: equity (left), drawdown % (right)
-- [ ] Drawdown series rendered as a filled area below zero in red
-- [ ] Retain existing zoom/pan behaviour
+- [x] Combine into a single Recharts chart with two Y-axes: equity (left), drawdown % (right)
+- [x] Drawdown series rendered as a filled area below zero in red
+- [x] Retain existing zoom/pan behaviour
 
 ---
 
@@ -300,9 +302,9 @@ relationship between account growth and risk periods.
 **Files:** backtest, optimization, g-optimize pages
 
 **Tasks:**
-- [ ] Replace generic spinners with skeleton placeholders that match the final
+- [x] Replace generic spinners with skeleton placeholders that match the final
       layout shape (result panel columns, trade table rows)
-- [ ] Prevents layout shift when data arrives
+- [x] Prevents layout shift when data arrives
 
 ---
 
@@ -311,10 +313,10 @@ relationship between account growth and risk periods.
 **File:** `frontend/src/components/BacktestResultPanel.tsx`
 
 **Tasks:**
-- [ ] Verify the select-all checkbox shows indeterminate state correctly when a
+- [x] Verify the select-all checkbox shows indeterminate state correctly when a
       partial set of trades is selected (uses `ref` callback — confirm it fires
       on every render, not just mount)
-- [ ] If broken: move `ref` callback to a `useEffect` that sets
+- [x] If broken: move `ref` callback to a `useEffect` that sets
       `el.indeterminate = checkedCount > 0 && checkedCount < total`
 
 ---
@@ -324,19 +326,19 @@ relationship between account growth and risk periods.
 **File:** `frontend/src/app/settings/page.tsx`, `frontend/src/app/globals.css`
 
 **Tasks:**
-- [ ] Add `ui_density: "compact" | "spacious"` to the settings schema in `lib/settings.ts`
-- [ ] In `globals.css`, wrap the padding compression overrides in a `:root.compact` class
-- [ ] On settings change, toggle the class on `<html>` — compact is the default (current behaviour)
+- [x] Add `ui_density: "compact" | "spacious"` to the settings schema in `lib/settings.ts`
+- [x] In `globals.css`, wrap the padding compression overrides in a `:root.compact` class
+- [x] On settings change, toggle the class on `<html>` — compact is the default (current behaviour)
 
 ---
 
 ### 5.2.11 — Dark Mode WCAG Contrast Review
 
 **Tasks:**
-- [ ] Audit `text-slate-500` and `text-slate-400` usages against their backgrounds
+- [x] Audit `text-slate-500` and `text-slate-400` usages against their backgrounds
       using a contrast checker (target: WCAG AA — 4.5:1 for body text)
-- [ ] Adjust problem colours in `globals.css` or swap Tailwind classes where contrast fails
-- [ ] Focus on trade table, metric labels, and sidebar text — highest-density areas
+- [x] Adjust problem colours in `globals.css` or swap Tailwind classes where contrast fails
+- [x] Focus on trade table, metric labels, and sidebar text — highest-density areas
 
 ---
 
@@ -348,9 +350,9 @@ relationship between account growth and risk periods.
 set env vars to override, which is fragile and couples tests to the environment.
 
 **Tasks:**
-- [ ] Refactor `Settings` to accept an optional `_env_overrides: dict` at construction
-- [ ] Update test fixtures to pass overrides directly instead of setting env vars
-- [ ] Verify pytest passes in CI without any live secrets in the env
+- [x] Refactor `Settings` to accept an optional `_env_overrides: dict` at construction
+- [x] Update test fixtures to pass overrides directly instead of setting env vars
+- [x] Verify pytest passes in CI without any live secrets in the env
 
 ---
 
@@ -359,10 +361,10 @@ set env vars to override, which is fragile and couples tests to the environment.
 **File:** `frontend/src/lib/strategyLabels.ts`
 
 **Tasks:**
-- [ ] Add Jest unit tests covering `conditionToLabel`, `exitConditionToLabel`,
+- [x] Add Jest unit tests covering `conditionToLabel`, `exitConditionToLabel`,
       and `filterToLabels` for all supported indicators (RSI, EMA, SMA, MACD,
       BB, ATR, ADX, STOCH)
-- [ ] Add regression cases for MACD (`fast`/`slow`/`signal_period`) and BB (`std_dev`)
+- [x] Add regression cases for MACD (`fast`/`slow`/`signal_period`) and BB (`std_dev`)
       — these have non-standard field names that are easy to break
 
 ---
@@ -372,10 +374,10 @@ set env vars to override, which is fragile and couples tests to the environment.
 **File:** `docs/api-integration.md` (new)
 
 **Tasks:**
-- [ ] Document the two-step trade analysis flow (`/trades/stats` → `/trades/analyze`)
-- [ ] Document all diagnosis endpoints with request/response shapes and field meanings
-- [ ] Document SSE stream events (optimization, g-optimize) with field-by-field breakdown
-- [ ] Keep it short — complement `/docs` (Swagger), don't replace it
+- [x] Document the two-step trade analysis flow (`/trades/stats` → `/trades/analyze`)
+- [x] Document all diagnosis endpoints with request/response shapes and field meanings
+- [x] Document SSE stream events (optimization, g-optimize) with field-by-field breakdown
+- [x] Keep it short — complement `/docs` (Swagger), don't replace it
 
 ---
 

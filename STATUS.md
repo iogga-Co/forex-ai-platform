@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-27 (Chart fixes + full UI state persistence across Superchart, Backtest, Optimization)
+**Last updated:** 2026-04-27 (UI state persistence · condition value rounding · strategies panel width tweaks)
 
 ---
 
@@ -23,13 +23,13 @@
 
 ---
 
-## Current Staging State (2026-04-26)
+## Current Staging State (2026-04-27)
 
 | Item | Value |
 |---|---|
 | URL | https://trading.iogga-co.com |
 | Health | ✅ 200 OK |
-| Last deployed commit | `bd471bb` (fix: clip Lab indicator range to last loaded candle) |
+| Last deployed commit | `4064a82` (fix: round condition values to 1 decimal in strategy labels) |
 | Services | All 10 up (nginx, fastapi, celery, celery-g-optimize, **trading-service**, nextjs, timescaledb, redis, prometheus, grafana) |
 | OANDA mode | `practice` (demo account, account 001-001-21125823-001) |
 | `LIVE_TRADING_ENABLED` | `false` |
@@ -1012,8 +1012,9 @@ Origin/main brought in: Spinbox component (hold-to-repeat, active border), lab A
 | `4be7ccd` | fix: Lab — auto-select `activeOsc` when builder indicators change |
 | `bd471bb` | fix: Lab — clip indicator `to` date to last loaded candle (`actualTo()`) |
 | `34d8860` | feat: Superchart — persist all indicator edits across page visits/logout |
-| (pending) | fix: Superchart — float precision in threshold Value input (`toFixed(6)`) |
-| (pending) | feat: Backtest + Optimize — persist form + `editedIr` per strategy; Reset button on Backtest |
+| `fce2673` | feat: Backtest + Optimize — persist form + `editedIr` per strategy; Reset button on Backtest; docs update |
+| `4064a82` | fix: round condition values to 1 decimal in strategy labels (`fv()` helper) |
+| (pending) | fix: Strategies page panel widths — strategy list `w-80→w-52`, backtest list `w-[330px]→w-[250px]` |
 
 ---
 
@@ -1037,7 +1038,7 @@ Origin/main brought in: Spinbox component (hold-to-repeat, active border), lab A
 
 **Fix — editedIr:** Added `savedSIRs: Record<strategyId, StrategyIR>` to `superchart_state`. Strategy load prefers `savedSIRs[id]` over `ir_json`. Persist effect saves when `isModified`, removes when restored to original. Reset restores `currentSIR` to `originalSIR` (which triggers the persist effect to clean up).
 
-### Backtest + Optimization persistence (pending commit)
+### Backtest + Optimization persistence (`fce2673`)
 
 **Backtest (new):** Full form persistence added (`backtest_state` localStorage key: form + `savedIRs`). URL params still take priority on mount. `editedIr` per strategy saved/restored. Reset button added to toolbar.
 
@@ -1051,7 +1052,6 @@ Origin/main brought in: Spinbox component (hold-to-repeat, active border), lab A
 
 | Item | Priority | Notes |
 |---|---|---|
-| Staging verification | **Now** | Verify AI panel chat works end-to-end on staging |
 | 5.2.8 Skeleton loaders | Low | Enhance skeleton placeholders to match final layout shape |
 | 5.2.11 WCAG contrast | Low | Audit `text-slate-500` / `text-gray-500` contrast ratios |
 | 5.2.14 API docs | Low | Frontend Integration Guide for diagnosis + SSE endpoints |

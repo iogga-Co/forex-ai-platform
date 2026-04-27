@@ -2,7 +2,7 @@
 
 ## Project overview
 
-AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (Claude), backtest them against historical OHLCV data, optimize with iterative AI refinement, and view results on interactive charts. Live trading (Phase 4) is next.
+AI-assisted forex trading platform. Users create strategies via an AI Co-Pilot (Claude), backtest them against historical OHLCV data, optimize with iterative AI refinement, and view results on interactive charts. Phases 0–5.2 complete; Phase 5.3 (Advanced Execution) is next.
 
 **Stack:** Next.js 15 (frontend) · FastAPI + uvicorn (backend) · Celery + Redis (task queue) · TimescaleDB + pgvector (database) · Nginx (reverse proxy) · Doppler (secrets) · Docker Compose
 
@@ -392,9 +392,9 @@ Verdict badge colours: `structural` = orange, `edge_decay` = red, `outlier` = bl
 ### strategyLabels utility
 
 `src/lib/strategyLabels.ts` exports:
-- `conditionToLabel(c: EntryCondition)` — human-readable entry condition string
+- `conditionToLabel(c: EntryCondition)` — human-readable entry condition string; numeric `value` fields run through `fv()` (rounds to 1 decimal, strips trailing `.0` — prevents `19.900000000000013`)
 - `exitConditionToLabel(ec)` — formats SL/TP as `ATR(14) × 1.5`, `50 pips`, or `2%`
-- `filterToLabels(filters, sizing)` — compact filter/sizing chip array
+- `filterToLabels(filters)` — compact filter/sizing chip array
 
 Used by the Co-Pilot Story panel and anywhere SIR needs to be rendered as readable text.
 

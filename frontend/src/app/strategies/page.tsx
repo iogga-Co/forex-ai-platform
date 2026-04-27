@@ -337,7 +337,7 @@ export default function StrategiesPage() {
     <div className="flex h-full overflow-hidden -m-1">
 
       {/* ── Left panel: strategy list ── */}
-      <div className="w-80 shrink-0 flex flex-col overflow-hidden border-r border-surface-border">
+      <div className="w-52 shrink-0 flex flex-col overflow-hidden border-r border-surface-border">
 
         {/* Header */}
         <div className="px-4 pt-4 pb-4 shrink-0">
@@ -545,7 +545,7 @@ export default function StrategiesPage() {
 
       {/* ── Middle panel: backtest list for selected strategy ── */}
       {selectedStrategyId && (
-        <div className="w-[330px] shrink-0 flex flex-col overflow-hidden border-r border-surface-border">
+        <div className="w-[250px] shrink-0 flex flex-col overflow-hidden border-r border-surface-border">
           <div className="px-4 py-4 border-b border-surface-border shrink-0 space-y-3">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
               Backtests{checkedBacktestIds.size > 0 ? ` · ${checkedBacktestIds.size}` : ""}
