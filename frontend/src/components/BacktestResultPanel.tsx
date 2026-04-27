@@ -101,7 +101,6 @@ interface StrategyIrShape {
   };
   filters?: { exclude_days?: string[]; session?: string };
   position_sizing?: { risk_per_trade_pct?: number; max_size_units?: number };
-  metadata?: { description?: string };
 }
 
 interface Strategy {
@@ -119,14 +118,36 @@ interface Strategy {
 const toTs = (iso: string): UTCTimestamp =>
   Math.floor(new Date(iso).getTime() / 1000) as UTCTimestamp;
 
-function fmt(v: number | null, decimals = 2): string {
+const usdFmt = new Intl.NumberFormat("en-US", { 
+  style: "currency", 
+  currency: "USD", 
+  maximumFractionDigits: 0 
+});
+
+const pctFmt = new Intl.NumberFormat("en-US", { 
+  style: "percent", 
+  minimumFractionDigits: 1, 
+  maximumFractionDigits: 1 
+});
+
+const valFmt = new Intl.NumberFormat("en-US", { 
+  minimumFractionDigits: 2, 
+  maximumFractionDigits: 2 
+});
+
+function fmt(v: number | null): string {
   if (v === null || v === undefined) return "—";
-  return v.toFixed(decimals);
+  return valFmt.format(v);
 }
 
 function fmtPct(v: number | null): string {
   if (v === null || v === undefined) return "—";
-  return (v * 100).toFixed(1) + "%";
+  return pctFmt.format(v);
+}
+
+function fmtUsd(v: number | null): string {
+  if (v === null || v === undefined) return "—";
+  return usdFmt.format(v);
 }
 
 function fmtDate(iso: string): string {
@@ -140,10 +161,6 @@ function fmtDateTime(iso: string): string {
     day: "2-digit", month: "short", year: "numeric",
     hour: "2-digit", minute: "2-digit",
   });
-}
-
-function tradeDurationMin(t: Trade): number {
-  return (new Date(t.exit_time).getTime() - new Date(t.entry_time).getTime()) / 60000;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,17 +184,6 @@ function MetricCard({ label, value }: { label: string; value: string }) {
     >
       <p className="text-[10px] text-gray-400 whitespace-nowrap">{label}{tip ? " ⓘ" : ""}</p>
       <p className="text-sm font-semibold text-gray-100 leading-none">{value}</p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ConditionCard
-// ---------------------------------------------------------------------------
-function ConditionCard({ text }: { text: string }) {
-  return (
-    <div className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs text-slate-200 leading-snug">
-      {text}
     </div>
   );
 }
@@ -213,6 +219,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
   const selectAllRef = useRef<HTMLInputElement>(null);
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartApiRef = useRef<IChartApi | null>(null);
   const selectPresetRef = useRef<HTMLDivElement>(null);
   const oscContainerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -298,6 +305,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
       rightPriceScale: { borderColor: "#374151" },
       timeScale: { borderColor: "#374151", timeVisible: true, secondsVisible: false },
     });
+    chartApiRef.current = chart;
     allCharts.push(chart);
 
     const candleSeries = chart.addCandlestickSeries({
@@ -477,6 +485,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
     return () => {
       window.removeEventListener("resize", handleResize);
       allCharts.forEach((c) => c.remove());
+      chartApiRef.current = null;
     };
   }, [candles, result, indicatorData]);
 
@@ -502,6 +511,9 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
   }
 
   const m = result.metrics;
+
+  const tradeDurationMin = (t: Trade): number => 
+    (new Date(t.exit_time).getTime() - new Date(t.entry_time).getTime()) / 60000;
 
   // --- Compute profit factor + trade durations for health badges ---
   const winnerTrades = result.trades.filter((t) => t.pnl > 0);
@@ -597,6 +609,19 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
     else if (preset === "outliers") ids = all200.filter(isOutlier).map((t) => t.id);
     else if (preset === "clear") { setCheckedTradeIds(new Set()); return; }
     setCheckedTradeIds(new Set(ids));
+  }
+
+  function goToTrade(t: Trade) {
+    if (!chartApiRef.current) return;
+    const entry = toTs(t.entry_time);
+    const exit = toTs(t.exit_time);
+    const duration = exit - entry;
+    const buffer = Math.max(duration * 2, 3600 * 4); // at least 4 hours buffer
+    
+    chartApiRef.current.timeScale().setVisibleRange({
+      from: (entry - buffer) as UTCTimestamp,
+      to: (exit + buffer) as UTCTimestamp,
+    });
   }
 
   const token = getAccessToken() ?? "";
@@ -1039,6 +1064,7 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
                     className="cursor-pointer accent-blue-500"
                   />
                 </th>
+                <th className="w-6 py-2 pr-2"></th>
                 {(
                   [
                     ["entry_time",   "Entry"],
@@ -1084,6 +1110,17 @@ export default function BacktestResultPanel({ id, onClose }: Props) {
                         onChange={() => toggleTrade(t.id)}
                         className="cursor-pointer accent-blue-500"
                       />
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); goToTrade(t); }}
+                        className="text-blue-500 hover:text-blue-400 transition-colors"
+                        title="Zoom to trade on chart"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                        </svg>
+                      </button>
                     </td>
                     <td className="py-1.5 pr-4">{fmtDateTime(t.entry_time)}</td>
                     <td className="pr-4">{fmtDateTime(t.exit_time)}</td>
