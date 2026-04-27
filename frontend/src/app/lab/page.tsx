@@ -329,6 +329,16 @@ function LabInner() {
     if (candles.length > 0) recompute(indicators, conditions, pair, timeframe, dateFrom, dateTo);
   }, [candles]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-select the first available oscillator when the active one isn't in the builder
+  useEffect(() => {
+    const oscInBuilder = [...new Set(
+      indicators.map(i => i.type).filter(t => OSC_TYPES.has(t))
+    )] as OscTab[];
+    if (oscInBuilder.length > 0 && !oscInBuilder.includes(activeOsc)) {
+      setActiveOsc(oscInBuilder[0]);
+    }
+  }, [indicators]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---------------------------------------------------------------------------
   // Render builder indicator series
   // ---------------------------------------------------------------------------
