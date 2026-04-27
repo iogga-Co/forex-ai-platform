@@ -105,6 +105,7 @@ interface PersistedSCState {
   chartOverlays: ChartOverlay[];
   selectedStratId: string;
   selectedBtId: string;
+  savedSIRs: Record<string, StrategyIR>;
 }
 
 function scLoad(): Partial<PersistedSCState> {
@@ -444,9 +445,10 @@ function SuperchartPageInner() {
     if (!selectedStratId) return;
     const strat = strategies.find((s) => s.id === selectedStratId);
     if (strat) {
-      const sir = JSON.parse(JSON.stringify(strat.ir_json)) as StrategyIR;
-      setCurrentSIR(sir);
-      setOriginalSIR(JSON.parse(JSON.stringify(sir)));
+      const original = JSON.parse(JSON.stringify(strat.ir_json)) as StrategyIR;
+      const saved = scLoad().savedSIRs?.[strat.id];
+      setCurrentSIR(saved ?? original);
+      setOriginalSIR(original);
     }
     // Load backtests for this strategy
     fetchWithAuth(`${API_BASE}/api/backtest/results?strategy_id=${selectedStratId}&limit=50`)
@@ -466,23 +468,18 @@ function SuperchartPageInner() {
       .catch(() => {});
   }, [selectedStratId, strategies]);
 
-  // Sync oscParams from SIR entry conditions when strategy changes
+  // Persist entry-condition edits per strategy — save when modified, remove when restored to original
   useEffect(() => {
-    if (!currentSIR) return;
-    const conds = currentSIR.entry_conditions;
-    setOscParams((prev) => {
-      const next = { ...prev };
-      for (const c of conds) {
-        const ind = c.indicator.toUpperCase() as OscTab;
-        if (ind === "RSI" && c.period)   next.RSI   = { period: c.period };
-        if (ind === "ADX" && c.period)   next.ADX   = { period: c.period };
-        if (ind === "ATR" && c.period)   next.ATR   = { period: c.period };
-        if (ind === "MACD")              next.MACD  = { fast: c.fast ?? 12, slow: c.slow ?? 26, signal_period: c.signal_period ?? 9 };
-        if (ind === "STOCH")             next.STOCH = { period: c.period ?? 14, k_smooth: c.k_smooth ?? 3, d_period: c.d_period ?? 3 };
-      }
-      return next;
-    });
-  }, [currentSIR]);
+    if (!selectedStratId || !currentSIR || !originalSIR) return;
+    const modified = JSON.stringify(currentSIR.entry_conditions) !== JSON.stringify(originalSIR.entry_conditions);
+    const existing = scLoad().savedSIRs ?? {};
+    if (modified) {
+      scSave({ savedSIRs: { ...existing, [selectedStratId]: currentSIR } });
+    } else {
+      const { [selectedStratId]: _removed, ...rest } = existing;
+      scSave({ savedSIRs: rest });
+    }
+  }, [currentSIR, selectedStratId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------------------------------------------------------------------------
   // Load trades when backtest selection changes
@@ -846,6 +843,10 @@ function SuperchartPageInner() {
     setChartOverlays([]);
     setSelectedBtId("");
     setTrades([]);
+    if (originalSIR) {
+      const fresh = JSON.parse(JSON.stringify(originalSIR)) as StrategyIR;
+      setCurrentSIR(fresh);
+    }
     if (strategies.length > 0) setSelectedStratId(strategies[0].id);
   }
 
