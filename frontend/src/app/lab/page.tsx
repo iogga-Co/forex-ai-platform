@@ -318,15 +318,22 @@ function LabInner() {
     setIndicatorData([]); setSignals([]);
   }
 
+  // Clamp to the last loaded candle so indicators don't extend past visible bars
+  function actualTo() {
+    return candles.length > 0
+      ? new Date(candles[candles.length - 1].time * 1000).toISOString().slice(0, 10)
+      : dateTo;
+  }
+
   function scheduleRecompute(inds: LabIndicator[], conds: LabCondition[]) {
     if (recomputeTimer.current) clearTimeout(recomputeTimer.current);
     recomputeTimer.current = setTimeout(() => {
-      recompute(inds, conds, pair, timeframe, dateFrom, dateTo);
+      recompute(inds, conds, pair, timeframe, dateFrom, actualTo());
     }, 300);
   }
 
   useEffect(() => {
-    if (candles.length > 0) recompute(indicators, conditions, pair, timeframe, dateFrom, dateTo);
+    if (candles.length > 0) recompute(indicators, conditions, pair, timeframe, dateFrom, actualTo());
   }, [candles]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-select the first available oscillator when the active one isn't in the builder
