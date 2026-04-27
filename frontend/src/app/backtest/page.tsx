@@ -44,6 +44,15 @@ interface RunSummary {
 const PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "GBPJPY", "USDCHF"];
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"];
 
+const BT_STATE_KEY = "backtest_state";
+interface PersistedBTState {
+  form: { strategy_id: string; pair: string; timeframe: string; period_start: string; period_end: string; initial_capital: string };
+  savedIRs: Record<string, Record<string, unknown>>;
+}
+function btLoad(): Partial<PersistedBTState> { try { return JSON.parse(localStorage.getItem(BT_STATE_KEY) ?? "{}"); } catch { return {}; } }
+function btSave(patch: Partial<PersistedBTState>) { try { localStorage.setItem(BT_STATE_KEY, JSON.stringify({ ...btLoad(), ...patch })); } catch {} }
+function btClear() { try { localStorage.removeItem(BT_STATE_KEY); } catch {} }
+
 interface ParamDef { key: string; label: string; step: number; min: number; max?: number; isInt?: boolean }
 
 function getConditionParams(cond: Record<string, unknown>): ParamDef[] {
@@ -134,13 +143,16 @@ function BacktestPageInner() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const cfg = loadSettings();
-  const [form, setForm] = useState({
-    strategy_id: searchParams.get("strategy_id") ?? "",
-    pair: searchParams.get("pair") ?? cfg.default_pair,
-    timeframe: searchParams.get("timeframe") ?? cfg.default_timeframe,
-    period_start: searchParams.get("period_start") ?? cfg.default_period_start,
-    period_end: searchParams.get("period_end") ?? cfg.default_period_end,
-    initial_capital: String(cfg.default_initial_capital),
+  const [form, setForm] = useState(() => {
+    const saved = btLoad().form ?? {} as Partial<PersistedBTState["form"]>;
+    return {
+      strategy_id:    searchParams.get("strategy_id")   ?? saved.strategy_id    ?? "",
+      pair:           searchParams.get("pair")           ?? saved.pair           ?? cfg.default_pair,
+      timeframe:      searchParams.get("timeframe")      ?? saved.timeframe      ?? cfg.default_timeframe,
+      period_start:   searchParams.get("period_start")   ?? saved.period_start   ?? cfg.default_period_start,
+      period_end:     searchParams.get("period_end")     ?? saved.period_end     ?? cfg.default_period_end,
+      initial_capital: saved.initial_capital ?? String(cfg.default_initial_capital),
+    };
   });
   const [editedIr, setEditedIr] = useState<Record<string, unknown> | null>(null);
   const [irDirty, setIrDirty] = useState(false);
@@ -188,17 +200,46 @@ function BacktestPageInner() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
-  // Sync editedIr when strategy selection changes
+  // Persist form to localStorage on every change
+  useEffect(() => { btSave({ form }); }, [form]);
+
+  // Sync editedIr when strategy selection changes — prefer saved edits over ir_json
   useEffect(() => {
     const strat = strategies.find((s) => s.id === form.strategy_id);
     if (strat?.ir_json) {
       const ir = strat.ir_json;
-      setEditedIr(typeof ir === "string" ? JSON.parse(ir) : { ...(ir as Record<string, unknown>) });
-      setIrDirty(false);
+      const original = typeof ir === "string" ? JSON.parse(ir) : { ...(ir as Record<string, unknown>) };
+      const savedIR = btLoad().savedIRs?.[strat.id];
+      setEditedIr(savedIR ?? original);
+      setIrDirty(!!savedIR);
     } else {
       setEditedIr(null);
     }
   }, [form.strategy_id, strategies]);
+
+  // Persist editedIr per strategy; remove when reset to original
+  useEffect(() => {
+    if (!form.strategy_id || !editedIr) return;
+    const existing = btLoad().savedIRs ?? {};
+    if (irDirty) {
+      btSave({ savedIRs: { ...existing, [form.strategy_id]: editedIr } });
+    } else {
+      const next = { ...existing };
+      delete next[form.strategy_id];
+      btSave({ savedIRs: next });
+    }
+  }, [editedIr, irDirty, form.strategy_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleFormReset() {
+    btClear();
+    setForm({
+      strategy_id: "", pair: cfg.default_pair, timeframe: cfg.default_timeframe,
+      period_start: cfg.default_period_start, period_end: cfg.default_period_end,
+      initial_capital: String(cfg.default_initial_capital),
+    });
+    setEditedIr(null);
+    setIrDirty(false);
+  }
 
   function updateEntryParam(idx: number, key: string, value: number) {
     setEditedIr((prev) => {
@@ -519,6 +560,11 @@ function BacktestPageInner() {
                   onClick={() => setDiagnosisOpen(true)}
                   className={`${btnBase} ${!sel ? "opacity-30 cursor-not-allowed" : ""}`}
                 >Diagnose</button>
+                <button
+                  type="button"
+                  onClick={handleFormReset}
+                  className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/40 transition-colors"
+                >Reset</button>
                 <div className="flex items-center gap-1">
                   {(() => {
                     const deleteIds = checkedIds.size > 0 ? checkedIds : sel ? new Set([sel.id]) : new Set<string>();

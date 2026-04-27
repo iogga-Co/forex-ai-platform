@@ -451,8 +451,21 @@ All API calls use `fetchWithAuth` from `@/lib/auth` — automatically attaches t
 ### localStorage keys
 
 - `copilot_system_prompt` — persisted system prompt in Co-Pilot tab; written on every keystroke, read on mount
-- `superchart_state` — full Superchart state persisted across navigation: pair, timeframe, date range, active oscillator, osc params, chart overlays, selected strategy/backtest. Restored on mount; URL params (`strategy_id`, `backtest_id`) still take priority. Reset button in toolbar clears it.
+- `superchart_state` — full Superchart state: pair, timeframe, date range, `activeOsc`, `oscParams`, `chartOverlays`, `selectedStratId`, `selectedBtId`, **`savedSIRs`**. URL params take priority on mount. Reset button clears it.
+  - `savedSIRs: Record<strategyId, StrategyIR>` — stores user-edited entry conditions per strategy. On strategy load, `savedSIRs[id]` is used instead of `ir_json`; cleared when user resets to original. `oscParams` are **never** overwritten by strategy load — fully user-controlled.
+- `backtest_state` — Backtest page form (strategy, pair, TF, dates, capital) + `savedIRs: Record<strategyId, IR>`. URL params take priority. Reset button in toolbar clears it.
+- `opt_form` — Optimization page form fields (strategy, pair, TF, dates, prompts, targets). URL params take priority. Reset button clears it.
+- `opt_saved_irs` — Optimization page `editedIr` per strategy. Same pattern as `superchart_state.savedSIRs`. Reset button clears it.
+- `lab_state` — Indicator Lab builder: pair, timeframe, dates, indicators, conditions.
 - Settings keys managed via `@/lib/settings`
+
+### Page persistence pattern (Superchart · Backtest · Optimization)
+
+All three pages persist editable indicator parameters so they survive navigation and logout. Only the Reset button returns to defaults.
+
+**oscParams (Superchart OSC bar):** saved to `superchart_state.oscParams` on every spinbox change. The SIR→oscParams auto-sync that previously overwrote saved values on every strategy load has been removed — oscParams are now exclusively user-controlled.
+
+**editedIr (entry conditions, exit multipliers, sizing):** saved per `strategyId` to `savedSIRs` / `savedIRs` / `opt_saved_irs`. On strategy load the saved IR takes priority over `ir_json`. Setting `irDirty = false` (inline "reset" link or Reset button) triggers the persist effect to remove the saved IR for that strategy, so it cleanly falls back to `ir_json` on next load.
 
 ### Batch delete pattern (checkboxes)
 
@@ -635,6 +648,10 @@ Detailed specs for planned features live in `docs/specs/`:
 Response schema identical to `GET /api/analytics/backtest/{id}/indicators` — frontend chart rendering is reused.
 
 `DELETE /api/lab/indicators/saved/{id}` requires `response_model=None` explicitly (FastAPI 204 assertion — `-> None` alone is insufficient in current version).
+
+**Indicator date range clamping:** `POST /api/lab/indicators` is called with the actual last candle's date as `to`, not the user's `dateTo` field. The candles API has `limit=5000`; for 1H over a full year that cuts data ~mid-year. Without clamping, indicator series extend past visible candles. The `actualTo()` helper in `lab/page.tsx` derives the end date from `candles[candles.length - 1].time`.
+
+**`activeOsc` auto-selection:** `uniqueOscTypes` is derived from `indicators` (only oscillator-type indicators in the builder). `activeOsc` defaults to `"RSI"` on mount. A `useEffect` on `indicators` auto-sets `activeOsc` to `uniqueOscTypes[0]` whenever `activeOsc` is not present in the builder — prevents blank sub-chart when user adds MACD (or any non-RSI oscillator) first.
 
 ### Indicator Lab — AI panel (`/analyze` endpoint)
 

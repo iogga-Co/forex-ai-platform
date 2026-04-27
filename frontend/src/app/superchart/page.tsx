@@ -1460,7 +1460,7 @@ function ConditionEditor({
         <Label label="Value">
           <input
             type="number"
-            value={cond.value ?? ""}
+            value={cond.value != null ? parseFloat(cond.value.toFixed(6)) : ""}
             step="any"
             onChange={(e) => onChange({ value: e.target.value === "" ? null : parseFloat(e.target.value) })}
             className="w-20 bg-zinc-700 rounded px-1.5 py-0.5 text-zinc-200 text-right"

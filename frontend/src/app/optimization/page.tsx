@@ -11,6 +11,7 @@ import Spinbox from "@/components/Spinbox";
 // Form persistence helpers
 // ---------------------------------------------------------------------------
 const OPT_FORM_KEY = "opt_form";
+const OPT_IR_KEY   = "opt_saved_irs";
 
 function optFormLoad(): Partial<Record<string, string>> {
   try { return JSON.parse(localStorage.getItem(OPT_FORM_KEY) ?? "{}"); } catch { return {}; }
@@ -20,6 +21,15 @@ function optFormSave(form: Record<string, string>) {
 }
 function optFormClear() {
   try { localStorage.removeItem(OPT_FORM_KEY); } catch {}
+}
+function optIRLoad(): Record<string, Record<string, unknown>> {
+  try { return JSON.parse(localStorage.getItem(OPT_IR_KEY) ?? "{}"); } catch { return {}; }
+}
+function optIRSave(irs: Record<string, Record<string, unknown>>) {
+  try { localStorage.setItem(OPT_IR_KEY, JSON.stringify(irs)); } catch {}
+}
+function optIRClear() {
+  try { localStorage.removeItem(OPT_IR_KEY); } catch {}
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +286,9 @@ function OptimizationPageInner() {
 
   function handleFormReset() {
     optFormClear();
+    optIRClear();
+    setEditedIr(null);
+    setIrDirty(false);
     setForm({
       strategy_id: "", pair: cfg.default_pair, timeframe: cfg.default_timeframe,
       period_start: cfg.default_period_start, period_end: cfg.default_period_end,
@@ -302,15 +315,29 @@ function OptimizationPageInner() {
     });
   }, []);
 
-  // When selected strategy changes, load its IR into the editable state
+  // When selected strategy changes, prefer saved edits over ir_json
   useEffect(() => {
     if (!form.strategy_id) { setEditedIr(null); setIrDirty(false); return; }
     const s = strategies.find((s) => s.id === form.strategy_id);
     if (s?.ir_json) {
-      setEditedIr(JSON.parse(JSON.stringify(s.ir_json)));
-      setIrDirty(false);
+      const savedIR = optIRLoad()[form.strategy_id];
+      setEditedIr(savedIR ?? JSON.parse(JSON.stringify(s.ir_json)));
+      setIrDirty(!!savedIR);
     }
   }, [form.strategy_id, strategies]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist editedIr per strategy; remove when reset to original
+  useEffect(() => {
+    if (!form.strategy_id || !editedIr) return;
+    const existing = optIRLoad();
+    if (irDirty) {
+      optIRSave({ ...existing, [form.strategy_id]: editedIr });
+    } else {
+      const next = { ...existing };
+      delete next[form.strategy_id];
+      optIRSave(next);
+    }
+  }, [editedIr, irDirty, form.strategy_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function updateEntryParam(idx: number, key: string, value: number) {
     setEditedIr((prev) => {

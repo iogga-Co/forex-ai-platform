@@ -1,6 +1,6 @@
 # Forex AI Platform — Project Status
 
-**Last updated:** 2026-04-26 (Indicator Lab AI panel + Spinbox rounding fix deployed to staging)
+**Last updated:** 2026-04-27 (Chart fixes + full UI state persistence across Superchart, Backtest, Optimization)
 
 ---
 
@@ -29,7 +29,7 @@
 |---|---|
 | URL | https://trading.iogga-co.com |
 | Health | ✅ 200 OK |
-| Last deployed commit | `22c07ca` (fix: resolve mypy errors in lab_agent.py) |
+| Last deployed commit | `bd471bb` (fix: clip Lab indicator range to last loaded candle) |
 | Services | All 10 up (nginx, fastapi, celery, celery-g-optimize, **trading-service**, nextjs, timescaledb, redis, prometheus, grafana) |
 | OANDA mode | `practice` (demo account, account 001-001-21125823-001) |
 | `LIVE_TRADING_ENABLED` | `false` |
@@ -986,6 +986,64 @@ Warmup for indicator overlays scales by `minutes_per_bar × 300 bars`.
 
 - **Spinbox float rounding** — derives decimal places from `step` prop; rounds display, increment, decrement, and typed values. Fixes `0.7999` showing instead of `0.8` in Backtest indicator parameter fields.
 - **`text-zinc-600` CSS override** — `rgb(188 188 188)` added to `globals.css` (joins existing slate-500, zinc-500, gray-500/600 overrides).
+
+---
+
+## Session 2026-04-27 — Chart Fixes + UI State Persistence
+
+### Repo sync
+
+Local `main` had diverged 18 commits from `origin/main` due to squash-merge history. Stashed all working-tree changes, hard-reset to `origin/main`, popped stash, resolved 4 merge conflicts:
+
+- `globals.css` — kept origin's `text-zinc-600` colour value; dropped redundant `.py-2` global (already scoped in origin)
+- `BacktestResultPanel.tsx` — kept origin's `METRIC_TIPS` tooltips; merged stash's `Intl.NumberFormat` formatters + zoom-to-trade button
+- `superchart/page.tsx` — took origin wholesale (`Spinbox` replaces `NumberInput`, tighter per-field min/max)
+- `lab/page.tsx` — took origin wholesale (already has crosshair sync, fixed sub-chart, `applyAiIR()`)
+
+Origin/main brought in: Spinbox component (hold-to-repeat, active border), lab AI panel fully wired, density toggle, toasts.
+
+---
+
+### Commits landed
+
+| Commit | Change |
+|---|---|
+| `e96e010` | feat: BacktestResultPanel — `Intl.NumberFormat` formatters, zoom-to-trade (`goToTrade` + 🔍 button) |
+| `4be7ccd` | fix: Lab — auto-select `activeOsc` when builder indicators change |
+| `bd471bb` | fix: Lab — clip indicator `to` date to last loaded candle (`actualTo()`) |
+| `34d8860` | feat: Superchart — persist all indicator edits across page visits/logout |
+| (pending) | fix: Superchart — float precision in threshold Value input (`toFixed(6)`) |
+| (pending) | feat: Backtest + Optimize — persist form + `editedIr` per strategy; Reset button on Backtest |
+
+---
+
+### BacktestResultPanel improvements (`e96e010`)
+
+- Replaced `.toFixed()` with `Intl.NumberFormat` for locale-aware metric display (`fmtUsd`, `fmtPct`, `fmt`)
+- Added `chartApiRef` + `goToTrade(t)` — sets chart visible range to ±buffer around trade entry/exit
+- 🔍 button per trade row in the trade table; `chartApiRef` assigned on chart creation, cleared on cleanup
+
+### Indicator Lab chart fixes
+
+**Blank sub-chart (`4be7ccd`):** `activeOsc` defaults to `"RSI"` on mount and never updated when user adds a different oscillator (e.g. MACD). Sub-chart rendered nothing until manual tab click. Fix: `useEffect` on `indicators` auto-sets `activeOsc = uniqueOscTypes[0]` whenever the current value isn't in the builder. Also fixes the on-load case (indicators restored from `lab_state` localStorage).
+
+**Indicators past candles (`bd471bb`):** `GET /api/candles?limit=5000` caps 1H data to ~7 months for a 1-year range; `POST /api/lab/indicators` has no cap and returns the full year. EMA/RSI lines extended months past the end of the candles. Fix: `actualTo()` helper derives the `to` date from `candles[candles.length-1].time` and passes it to both `scheduleRecompute` and the candles-change effect.
+
+### Superchart persistence (`34d8860`)
+
+**Problem:** `oscParams` were saved to localStorage but the SIR→oscParams sync effect overwrote them on every strategy load. Entry condition edits (`editedIr`) were never saved at all.
+
+**Fix — oscParams:** Removed the `useEffect([currentSIR])` that synced SIR entry condition periods into `oscParams`. oscParams are now exclusively user-controlled; only Reset clears them.
+
+**Fix — editedIr:** Added `savedSIRs: Record<strategyId, StrategyIR>` to `superchart_state`. Strategy load prefers `savedSIRs[id]` over `ir_json`. Persist effect saves when `isModified`, removes when restored to original. Reset restores `currentSIR` to `originalSIR` (which triggers the persist effect to clean up).
+
+### Backtest + Optimization persistence (pending commit)
+
+**Backtest (new):** Full form persistence added (`backtest_state` localStorage key: form + `savedIRs`). URL params still take priority on mount. `editedIr` per strategy saved/restored. Reset button added to toolbar.
+
+**Optimization (extended):** `editedIr` per strategy now persisted to `opt_saved_irs` localStorage key. `handleFormReset` also clears saved IRs and resets `editedIr`/`irDirty`.
+
+**Pattern (all three pages):** Strategy-change effect prefers saved IR over `ir_json`; `irDirty = true` when loaded from saved. The persist effect saves to `savedIRs[strategyId]` when dirty, deletes when not dirty. The inline "reset" link sets `irDirty = false`, which triggers cleanup via the same effect.
 
 ---
 
