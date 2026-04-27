@@ -27,6 +27,11 @@ export interface ExitCondition {
 // ---------------------------------------------------------------------------
 // conditionToLabel — entry condition → plain English sentence
 // ---------------------------------------------------------------------------
+function fv(v: number | null | undefined): string {
+  if (v == null) return "";
+  return String(parseFloat(v.toFixed(1)));
+}
+
 export function conditionToLabel(c: EntryCondition): string {
   const p = c.period;
 
@@ -42,8 +47,8 @@ export function conditionToLabel(c: EntryCondition): string {
         : c.value != null && c.value >= 50 && isAbove ? "momentum positive"
         : c.value != null && c.value < 50 && !isAbove ? "momentum negative"
         : "";
-      if (verb) return `RSI (${p}) ${verb} ${c.value}${hint ? ` — ${hint}` : ""}`;
-      return `RSI (${p}) ${dir} ${c.value}${hint ? ` — ${hint}` : ""}`;
+      if (verb) return `RSI (${p}) ${verb} ${fv(c.value)}${hint ? ` — ${hint}` : ""}`;
+      return `RSI (${p}) ${dir} ${fv(c.value)}${hint ? ` — ${hint}` : ""}`;
     }
 
     case "EMA": {
@@ -53,7 +58,7 @@ export function conditionToLabel(c: EntryCondition): string {
         return `Price crosses above EMA (${p})`;
       if (c.operator === "crossed_below" || c.operator === "cross_below")
         return `Price crosses below EMA (${p})`;
-      return `EMA (${p}) ${c.operator} ${c.value}`;
+      return `EMA (${p}) ${c.operator} ${fv(c.value)}`;
     }
 
     case "SMA": {
@@ -63,7 +68,7 @@ export function conditionToLabel(c: EntryCondition): string {
         return `Price crosses above SMA (${p})`;
       if (c.operator === "crossed_below" || c.operator === "cross_below")
         return `Price crosses below SMA (${p})`;
-      return `SMA (${p}) ${c.operator} ${c.value}`;
+      return `SMA (${p}) ${c.operator} ${fv(c.value)}`;
     }
 
     case "MACD": {
@@ -74,7 +79,7 @@ export function conditionToLabel(c: EntryCondition): string {
         return `MACD crosses below signal (${params})`;
       if (c.operator === ">") return `MACD line above signal (${params})`;
       if (c.operator === "<") return `MACD line below signal (${params})`;
-      return `MACD (${params}) ${c.operator} ${c.value}`;
+      return `MACD (${params}) ${c.operator} ${fv(c.value)}`;
     }
 
     case "BB": {
@@ -90,12 +95,12 @@ export function conditionToLabel(c: EntryCondition): string {
         return `Price crosses above ${band} Bollinger Band (${p}, ${sigma})`;
       if (c.operator === "crossed_below" || c.operator === "cross_below")
         return `Price crosses below ${band} Bollinger Band (${p}, ${sigma})`;
-      return `BB ${band} (${p}, ${sigma}) ${c.operator} ${c.value}`;
+      return `BB ${band} (${p}, ${sigma}) ${c.operator} ${fv(c.value)}`;
     }
 
     case "ATR": {
       const dir = c.operator === ">" || c.operator === ">=" ? "above" : "below";
-      return `ATR (${p}) ${dir} ${c.value} — volatility ${dir === "above" ? "high" : "low"}`;
+      return `ATR (${p}) ${dir} ${fv(c.value)} — volatility ${dir === "above" ? "high" : "low"}`;
     }
 
     case "ADX": {
@@ -105,7 +110,7 @@ export function conditionToLabel(c: EntryCondition): string {
         c.value != null && c.value >= 25 && isAbove ? "trend strong"
         : c.value != null && c.value < 25 && !isAbove ? "trend weak"
         : "";
-      return `ADX (${p}) ${dir} ${c.value}${hint ? ` — ${hint}` : ""}`;
+      return `ADX (${p}) ${dir} ${fv(c.value)}${hint ? ` — ${hint}` : ""}`;
     }
 
     case "STOCH": {
@@ -115,11 +120,11 @@ export function conditionToLabel(c: EntryCondition): string {
         c.value != null && c.value <= 20 && !isAbove ? "oversold"
         : c.value != null && c.value >= 80 && isAbove ? "overbought"
         : "";
-      return `Stochastic K (${c.k_smooth ?? p}) ${dir} ${c.value}${hint ? ` — ${hint}` : ""}`;
+      return `Stochastic K (${c.k_smooth ?? p}) ${dir} ${fv(c.value)}${hint ? ` — ${hint}` : ""}`;
     }
 
     default:
-      return `${c.indicator} ${c.operator} ${c.value ?? ""}`.trim();
+      return `${c.indicator} ${c.operator} ${fv(c.value)}`.trim();
   }
 }
 
