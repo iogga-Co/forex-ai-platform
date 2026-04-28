@@ -1,9 +1,11 @@
 """
-Order executor — Phase 4 PR3.
+Order executor — Phase 4 PR3 + Phase 5.3 Advanced Execution.
 
 Receives TradeSignal events from the signal engine (via Redis live:signals),
-submits market orders to OANDA, and tracks the full order lifecycle in the
-live_orders table.
+checks spread gating, then routes to the appropriate execution mode:
+  - market  : single market order (default)
+  - limit   : limit order with ATR-based offset; cancelled if unfilled after expiry
+  - twap    : order split into N equal market-order slices over T minutes
 
 Only active when LIVE_TRADING_ENABLED=true.  In shadow mode (false) the
 executor is not started — signals are still logged but never reach here.
@@ -12,7 +14,7 @@ Order lifecycle:
   pending  → order submitted to OANDA, awaiting fill confirmation
   filled   → fill confirmed, position is open
   closed   → position closed (SL/TP hit or kill-switch)
-  cancelled → kill-switch closed the position manually
+  cancelled → kill-switch or limit-expiry closed the position
   rejected  → OANDA rejected the order
 """
 
@@ -27,6 +29,7 @@ import redis.asyncio as aioredis
 
 from core.config import settings
 from live.oanda import OandaClient
+from live.twap import execute_twap
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +57,6 @@ def _compute_units(
 
     risk_amount = account_balance × risk_per_trade_pct / 100
     stop_distance = atr_value × multiplier
-    pip_value ≈ 1 pip in account currency (simplified: 0.0001 for non-JPY, 0.01 for JPY)
     units = risk_amount / stop_distance
     """
     if atr_value <= 0 or multiplier <= 0:
@@ -161,7 +163,7 @@ class LiveExecutor:
         await r.expire(result_key, 30)  # type: ignore[misc]
 
     # ------------------------------------------------------------------
-    # Signal handling
+    # Signal handling — top level
     # ------------------------------------------------------------------
 
     async def _handle_signal(self, signal: dict) -> None:
@@ -172,26 +174,34 @@ class LiveExecutor:
             return
 
         try:
-            # Fetch strategy IR for sizing parameters
             ir = await self._fetch_strategy_ir(strategy_id)
             if ir is None:
                 logger.warning("Executor: strategy %s not found", strategy_id)
                 return
 
-            # Get account balance for position sizing
-            account = await self._oanda.get_account_summary()
-            balance = float(account.get("balance", 10_000))
+            # --- Phase 5.3: Spread gate ---
+            exec_cfg     = ir.get("execution") or {}
+            max_spread   = float(exec_cfg.get("max_spread_pips", 3.0))
+            signal_spread = signal.get("spread_pips")
+            if signal_spread is not None and float(signal_spread) > max_spread:
+                logger.info(
+                    "Executor: skipping %s — spread %.2f pips exceeds max %.2f pips",
+                    pair, float(signal_spread), max_spread,
+                )
+                return
 
-            # Calculate units from ATR sizing
-            sl_cfg    = (ir.get("exit_conditions") or {}).get("stop_loss", {})
-            sizing    = ir.get("position_sizing") or {}
-            sl_mult   = float(sl_cfg.get("multiplier", 1.5))
-            risk_pct  = float(sizing.get("risk_per_trade_pct", 1.0))
+            # --- Position sizing ---
+            account  = await self._oanda.get_account_summary()
+            balance  = float(account.get("balance", 10_000))
+            sl_cfg   = (ir.get("exit_conditions") or {}).get("stop_loss", {})
+            sizing   = ir.get("position_sizing") or {}
+            sl_mult  = float(sl_cfg.get("multiplier", 1.5))
+            risk_pct = float(sizing.get("risk_per_trade_pct", 1.0))
+
             atr_value = signal.get("atr_value")
             if atr_value is None or float(atr_value) <= 0:
                 logger.critical(
-                    "Executor: aborting order for %s — ATR missing or zero in signal (atr_value=%s). "
-                    "No order placed.",
+                    "Executor: aborting order for %s — ATR missing or zero (atr_value=%s)",
                     pair, atr_value,
                 )
                 return
@@ -201,46 +211,170 @@ class LiveExecutor:
             if direction == "short":
                 units = -units
 
-            # SL/TP distances kept for PR4 where live ATR will set exact prices
-            tp_cfg  = (ir.get("exit_conditions") or {}).get("take_profit", {})
-            _ = float(tp_cfg.get("multiplier", 3.0))  # tp_mult — used in PR4
-
-            # Insert live_order row (status=pending)
+            # --- Phase 5.3: Execution mode routing ---
+            exec_mode  = str(exec_cfg.get("mode", "market"))
+            spread_pips = float(signal_spread) if signal_spread is not None else None
             order_id = await self._insert_order(
                 strategy_id=strategy_id,
                 pair=pair,
                 direction=direction,
                 units=abs(units),
+                execution_mode=exec_mode,
+                spread_pips=spread_pips,
             )
 
-            # Place order with OANDA
-            try:
-                result = await self._oanda.place_market_order(
-                    instrument=pair,
-                    units=units,
-                )
-                oanda_order_id = (
-                    result.get("orderFillTransaction", {}).get("id")
-                    or result.get("orderCreateTransaction", {}).get("id")
-                )
-                entry_price = float(
-                    result.get("orderFillTransaction", {}).get("price", 0) or 0
-                )
-                await self._update_order_filled(
-                    order_id=order_id,
-                    oanda_order_id=oanda_order_id,
-                    entry_price=entry_price or None,
-                )
-                logger.info(
-                    "Order filled: %s %s %d units @ %.5f",
-                    pair, direction, abs(units), entry_price,
-                )
-            except Exception as exc:
-                logger.error("OANDA order failed for %s: %s", pair, exc)
-                await self._update_order_rejected(order_id, str(exc))
+            if exec_mode == "limit":
+                await self._handle_limit(signal, exec_cfg, order_id, pair, units, atr_value)
+            elif exec_mode == "twap":
+                await self._handle_twap(exec_cfg, order_id, pair, units)
+            else:
+                await self._handle_market(order_id, pair, units)
 
         except Exception as exc:
             logger.error("Executor signal handler failed for %s: %s", pair, exc, exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Execution: market order
+    # ------------------------------------------------------------------
+
+    async def _handle_market(self, order_id: UUID, pair: str, units: int) -> None:
+        try:
+            result = await self._oanda.place_market_order(instrument=pair, units=units)
+            oanda_order_id = (
+                result.get("orderFillTransaction", {}).get("id")
+                or result.get("orderCreateTransaction", {}).get("id")
+            )
+            entry_price = float(
+                result.get("orderFillTransaction", {}).get("price", 0) or 0
+            )
+            await self._update_order_filled(order_id, oanda_order_id, entry_price or None)
+            logger.info(
+                "Market order filled: %s %+d units @ %.5f",
+                pair, units, entry_price,
+            )
+        except Exception as exc:
+            logger.error("Market order failed for %s: %s", pair, exc)
+            await self._update_order_rejected(order_id, str(exc))
+
+    # ------------------------------------------------------------------
+    # Execution: limit order
+    # ------------------------------------------------------------------
+
+    async def _handle_limit(
+        self,
+        signal: dict,
+        exec_cfg: dict,
+        order_id: UUID,
+        pair: str,
+        units: int,
+        atr_value: float,
+    ) -> None:
+        """
+        Place a limit entry at close_price ± (limit_offset_atr × atr_value).
+        Long: limit below the bar's close (wait for price to pull back to us).
+        Short: limit above the bar's close.
+        """
+        close_price = float(signal.get("close_price") or 0)
+        if close_price <= 0:
+            logger.warning("Executor: limit order skipped for %s — no close_price in signal", pair)
+            await self._update_order_rejected(order_id, "missing close_price for limit entry")
+            return
+
+        offset_atr = float(exec_cfg.get("limit_offset_atr", 0.5))
+        offset     = offset_atr * atr_value
+        if units > 0:  # long: buy below current price
+            limit_price = close_price - offset
+        else:           # short: sell above current price
+            limit_price = close_price + offset
+
+        expiry_sec = int(exec_cfg.get("limit_expiry_minutes", 5)) * 60
+
+        try:
+            result = await self._oanda.place_limit_order(
+                instrument=pair,
+                units=units,
+                price=limit_price,
+                expiry_seconds=expiry_sec,
+            )
+            oanda_order_id = (
+                result.get("orderCreateTransaction", {}).get("id")
+                or result.get("orderFillTransaction", {}).get("id")
+            )
+            await self._update_order_limit_placed(order_id, oanda_order_id, limit_price)
+            logger.info(
+                "Limit order placed: %s %+d units @ %.5f (expiry %ds)",
+                pair, units, limit_price, expiry_sec,
+            )
+            # Monitor in background: cancel after expiry if still unfilled
+            if oanda_order_id:
+                asyncio.create_task(
+                    self._monitor_limit_expiry(oanda_order_id, order_id, expiry_sec),
+                    name=f"limit-monitor-{oanda_order_id}",
+                )
+        except Exception as exc:
+            logger.error("Limit order failed for %s: %s", pair, exc)
+            await self._update_order_rejected(order_id, str(exc))
+
+    async def _monitor_limit_expiry(
+        self,
+        oanda_order_id: str,
+        order_id: UUID,
+        expiry_sec: int,
+    ) -> None:
+        """Wait expiry_sec then cancel the limit if still unfilled."""
+        await asyncio.sleep(expiry_sec)
+        try:
+            await self._oanda.cancel_order(oanda_order_id)
+            await self._update_order_status(order_id, "cancelled")
+            logger.info("Limit order %s expired — cancelled", oanda_order_id)
+        except Exception:
+            # Cancel failed — order was likely already filled or cancelled by OANDA GTD
+            logger.debug(
+                "Limit order %s cancel failed at expiry (probably filled or already gone)",
+                oanda_order_id,
+            )
+
+    # ------------------------------------------------------------------
+    # Execution: TWAP
+    # ------------------------------------------------------------------
+
+    async def _handle_twap(
+        self,
+        exec_cfg: dict,
+        order_id: UUID,
+        pair: str,
+        units: int,
+    ) -> None:
+        slices       = int(exec_cfg.get("twap_slices", 3))
+        interval_min = float(exec_cfg.get("twap_interval_minutes", 2))
+        interval_sec = interval_min * 60
+
+        try:
+            results = await execute_twap(
+                oanda=self._oanda,
+                instrument=pair,
+                total_units=units,
+                slices=slices,
+                interval_sec=interval_sec,
+            )
+            # Consider the TWAP filled if at least one slice succeeded
+            filled_slices = [r for r in results if "error" not in r]
+            if filled_slices:
+                first_fill = filled_slices[0]
+                entry_price = float(
+                    first_fill.get("orderFillTransaction", {}).get("price", 0) or 0
+                )
+                oanda_order_id = first_fill.get("orderFillTransaction", {}).get("id")
+                await self._update_order_filled(order_id, oanda_order_id, entry_price or None)
+                logger.info(
+                    "TWAP complete for %s: %d/%d slices filled",
+                    pair, len(filled_slices), slices,
+                )
+            else:
+                await self._update_order_rejected(order_id, "all TWAP slices failed")
+        except Exception as exc:
+            logger.error("TWAP execution failed for %s: %s", pair, exc)
+            await self._update_order_rejected(order_id, str(exc))
 
     # ------------------------------------------------------------------
     # Open-position polling
@@ -275,11 +409,7 @@ class LiveExecutor:
                 logger.debug("Position poll error: %s", exc)
 
     async def _reconcile_on_startup(self) -> None:
-        """Sync stale filled orders against OANDA on startup.
-
-        If the platform was offline when a SL/TP hit, DB rows stay 'filled'
-        forever. This corrects them before the main loop begins.
-        """
+        """Sync stale filled orders against OANDA on startup."""
         try:
             positions = await self._oanda.get_open_positions()
             open_pairs = {p["instrument"].replace("_", "") for p in positions}
@@ -359,15 +489,19 @@ class LiveExecutor:
         pair: str,
         direction: str,
         units: int,
+        execution_mode: str = "market",
+        spread_pips: float | None = None,
     ) -> UUID:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO live_orders (strategy_id, status, direction, size, shadow_mode)
-                VALUES ($1, 'pending', $2, $3, false)
+                INSERT INTO live_orders
+                    (strategy_id, pair, status, direction, size, shadow_mode,
+                     execution_mode, spread_pips)
+                VALUES ($1, $2, 'pending', $3, $4, false, $5, $6)
                 RETURNING id
                 """,
-                strategy_id, direction, units,
+                strategy_id, pair, direction, units, execution_mode, spread_pips,
             )
         return row["id"]
 
@@ -389,6 +523,35 @@ class LiveExecutor:
                 order_id, oanda_order_id, entry_price,
             )
 
+    async def _update_order_limit_placed(
+        self,
+        order_id: UUID,
+        oanda_order_id: str | None,
+        limit_price: float,
+    ) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE live_orders
+                SET oanda_order_id = $2,
+                    limit_price    = $3
+                WHERE id = $1
+                """,
+                order_id, oanda_order_id, limit_price,
+            )
+
+    async def _update_order_status(self, order_id: UUID, status: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE live_orders
+                SET status = $2,
+                    closed_at = CASE WHEN $2 IN ('cancelled','closed') THEN NOW() ELSE closed_at END
+                WHERE id = $1
+                """,
+                order_id, status,
+            )
+
     async def _update_order_rejected(self, order_id: UUID, reason: str) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -399,5 +562,3 @@ class LiveExecutor:
                 """,
                 order_id, reason[:2000],
             )
-
-

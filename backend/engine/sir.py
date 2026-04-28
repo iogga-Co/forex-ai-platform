@@ -153,9 +153,23 @@ class PositionSizingConfig(BaseModel):
     max_size_units: int = Field(default=100_000, gt=0)
 
 
+class ExecutionConfig(BaseModel):
+    """Live order execution parameters (Phase 5.3)."""
+    mode: Literal["market", "limit", "twap"] = "market"
+    # limit mode: place entry at a pullback from bar close
+    limit_offset_atr: float = Field(default=0.5, gt=0)    # offset in ATR fractions below ask (long) / above bid (short)
+    limit_expiry_minutes: int = Field(default=5, ge=1)     # cancel unfilled limit after N minutes
+    # twap mode: split large orders across time
+    twap_slices: int = Field(default=3, ge=2, le=10)       # number of order slices
+    twap_interval_minutes: int = Field(default=2, ge=1)    # minutes between slices
+    # universal: skip signal when spread is elevated
+    max_spread_pips: float = Field(default=3.0, gt=0)
+
+
 class StrategyIR(BaseModel):
     entry_conditions: list[IndicatorCondition] = Field(min_length=1)
     exit_conditions: ExitConditions
     filters: FiltersConfig = Field(default_factory=FiltersConfig)
     position_sizing: PositionSizingConfig = Field(default_factory=PositionSizingConfig)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     metadata: dict = Field(default_factory=dict)

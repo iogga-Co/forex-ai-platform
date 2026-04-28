@@ -18,7 +18,7 @@
 | **5.0** | Live Trading Hardening | ✅ Complete | ✅ ATR abort, reconciliation, pip registry, MFA — 209 tests pass |
 | **5.1** | Microservice Decomposition | ✅ Complete | ✅ trading-service container; Redis command channel |
 | **5.2** | UX & Stability | ✅ Complete | ✅ toasts, dual-axis chart, density toggle, SSE backoff, 24 vitest tests |
-| **5.3** | Advanced Execution | 🔲 Pending | Limit orders, spread estimation, TWAP |
+| **5.3** | Advanced Execution | ✅ Complete | Limit orders, spread gating, TWAP — 33 tests pass |
 | **5.4** | RAG Evaluation | 🔲 Pending | LLM-as-judge for G-Optimize summaries |
 
 ---
@@ -1055,6 +1055,7 @@ Origin/main brought in: Spinbox component (hold-to-repeat, active border), lab A
 | 5.2.8 Skeleton loaders | Low | Enhance skeleton placeholders to match final layout shape |
 | 5.2.11 WCAG contrast | Low | Audit `text-slate-500` / `text-gray-500` contrast ratios |
 | 5.2.14 API docs | Low | Frontend Integration Guide for diagnosis + SSE endpoints |
+| vectorbt profiling | Low | Profile multi-year backtest runs to identify SIR parsing or indicator bottlenecks |
 | Phase 5.3 | Next | Limit orders, dynamic spread estimation, TWAP |
 | Phase 5.4 | Next | RAG evaluation framework (G-Eval / Ragas) |
 | ML Signal Engine | Phase 5+ | Spec complete — `docs/specs/ml-engine.md` |

@@ -188,6 +188,7 @@ async def _publish_signal(
     bar: OHLCVBar,
     strategy: dict,
     atr_value: float,
+    spread_pips: float = 0.0,
 ) -> None:
     shadow = not settings.live_trading_enabled
     signal = {
@@ -199,6 +200,8 @@ async def _publish_signal(
         "strategy_name": strategy["name"],
         "shadow":        shadow,
         "atr_value":     atr_value,
+        "spread_pips":   spread_pips,   # Phase 5.3: spread at signal time for executor gating
+        "close_price":   bar.close,     # Phase 5.3: used by executor for limit entry offset
     }
     payload = json.dumps(signal)
     await r.publish(SIGNAL_CHANNEL, payload)
@@ -249,6 +252,7 @@ async def _pair_worker(
     builder_1m = BarBuilder(pair, "1m")
     builder_1h = BarBuilder(pair, "1H")
     r: aioredis.Redis | None = None
+    last_spread_pips: float = 0.0  # Phase 5.3: track latest tick spread for signal payload
 
     try:
         r = aioredis.from_url(settings.redis_url, decode_responses=True)
@@ -274,6 +278,12 @@ async def _pair_worker(
             tick_time = datetime.fromisoformat(
                 data["time"].replace("Z", "+00:00")
             )
+
+            # Update rolling spread tracker (Phase 5.3)
+            from core.instruments import get_pip_size as _get_pip_size
+            pip = _get_pip_size(pair)
+            if pip > 0:
+                last_spread_pips = (ask - bid) / pip
 
             for builder in (builder_1m, builder_1h):
                 completed = builder.update(bid, ask, tick_time)
@@ -302,7 +312,9 @@ async def _pair_worker(
                         )
                         atr_series = calc_atr(df["high"], df["low"], df["close"], sl_period)
                         atr_val = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
-                        asyncio.create_task(_publish_signal(r, completed, strategy, atr_val))
+                        asyncio.create_task(
+                            _publish_signal(r, completed, strategy, atr_val, last_spread_pips)
+                        )
 
     except asyncio.CancelledError:
         pass

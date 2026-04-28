@@ -156,6 +156,58 @@ class OandaClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def place_limit_order(
+        self,
+        instrument: str,
+        units: int,
+        price: float,
+        expiry_seconds: int = 300,
+        sl_price: float | None = None,
+        tp_price: float | None = None,
+    ) -> dict[str, Any]:
+        """
+        Place a GTD limit order.
+
+        units > 0 = long, units < 0 = short.
+        price: the limit entry price.
+        expiry_seconds: OANDA cancels the order if unfilled by this deadline.
+        Returns the OANDA order create transaction dict.
+        """
+        from datetime import datetime, timedelta, timezone
+        expiry = (
+            datetime.now(timezone.utc) + timedelta(seconds=expiry_seconds)
+        ).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+
+        order: dict[str, Any] = {
+            "type":        "LIMIT",
+            "instrument":  _to_oanda(instrument),
+            "units":       str(units),
+            "price":       f"{price:.5f}",
+            "timeInForce": "GTD",
+            "gtdTime":     expiry,
+        }
+        if sl_price is not None:
+            order["stopLossOnFill"] = {"price": f"{sl_price:.5f}"}
+        if tp_price is not None:
+            order["takeProfitOnFill"] = {"price": f"{tp_price:.5f}"}
+
+        url = f"{self._base_url}/v3/accounts/{self._account_id}/orders"
+        async with httpx.AsyncClient(headers=self._headers, timeout=10) as client:
+            resp = await client.post(url, json={"order": order})
+            resp.raise_for_status()
+            return resp.json()
+
+    async def cancel_order(self, order_id: str) -> dict[str, Any]:
+        """Cancel a pending order by its OANDA order ID."""
+        url = (
+            f"{self._base_url}/v3/accounts/{self._account_id}"
+            f"/orders/{order_id}/cancel"
+        )
+        async with httpx.AsyncClient(headers=self._headers, timeout=10) as client:
+            resp = await client.put(url)
+            resp.raise_for_status()
+            return resp.json()
+
     async def close_position(self, instrument: str) -> dict[str, Any]:
         """Close all units of an open position for the given instrument."""
         url = (
