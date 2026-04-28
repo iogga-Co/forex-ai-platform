@@ -142,19 +142,28 @@ def test_fuse_respects_top_n():
     assert len(fused) <= 6  # _TOP_N = 6
 
 
-def test_fuse_drops_single_path_low_score():
-    """Chunks appearing in only one retrieval path score ~0.016 — below _MIN_RRF_SCORE=0.020."""
+def test_fuse_rank1_single_path_included():
+    """Rank-1 single-path hit scores 1/61≈0.0164 — above _MIN_RRF_SCORE=0.015, so included."""
     only_vector = [{"id": "v_only", "content": "x"}]
     only_bm25 = [{"id": "b_only", "content": "y"}]
     fused = _fuse(only_vector, only_bm25, id_key="id")
-    # Neither chunk reaches _MIN_RRF_SCORE, so both should be filtered out
+    # Both items appear at rank 1 in their respective lists (score ≈ 0.016 > 0.015)
     ids = [r["id"] for r in fused]
-    assert "v_only" not in ids
-    assert "b_only" not in ids
+    assert "v_only" in ids
+    assert "b_only" in ids
+
+
+def test_fuse_drops_deep_single_path_hit():
+    """Single-path hits at rank ≥ 7 score < 0.015 and must be filtered out."""
+    # item at rank 7: score = 1/(60+7) ≈ 0.0149 < 0.015
+    many = [{"id": f"item_{i}", "content": "x"} for i in range(7)]
+    fused = _fuse(many, [], id_key="id")
+    ids = {r["id"] for r in fused}
+    assert "item_6" not in ids  # rank 7, zero-indexed
 
 
 def test_fuse_keeps_dual_path_chunk():
-    """A chunk appearing in both paths scores ~0.032 — above _MIN_RRF_SCORE=0.020."""
+    """A chunk appearing in both paths scores ~0.032 — well above _MIN_RRF_SCORE=0.015."""
     shared = [{"id": "both", "content": "z"}]
     fused = _fuse(shared, shared, id_key="id")
     assert any(r["id"] == "both" for r in fused)

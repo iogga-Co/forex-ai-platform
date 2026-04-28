@@ -145,6 +145,24 @@ async def chat(
                     session_id=str(payload.session_id),
                 )
 
+                # Log retrieved chunks for RAG quality analysis (best-effort)
+                if context_chunks:
+                    try:
+                        await conn.executemany(
+                            "INSERT INTO rag_retrievals (session_id, source, chunk_id, rrf_score) VALUES ($1, $2, $3, $4)",
+                            [
+                                (
+                                    payload.session_id,
+                                    c["source"],
+                                    c["metadata"]["id"],
+                                    c["metadata"].get("rrf_score", 0.0),
+                                )
+                                for c in context_chunks
+                            ],
+                        )
+                    except Exception as log_exc:
+                        logger.warning("RAG retrieval logging failed: %s", log_exc)
+
                 # 4. Fetch conversation history for this session (last 20 turns)
                 history_rows = await conn.fetch(
                     """

@@ -26,9 +26,9 @@ _TOP_N = 6
 _RRF_K = 60
 # Minimum RRF score to include a chunk.
 # With _RRF_K=60, a chunk appearing in only one list at any rank scores at most
-# 1/(60+1) ≈ 0.0164.  A threshold of 0.020 requires agreement from both
-# semantic and keyword retrieval, discarding single-path low-confidence hits.
-_MIN_RRF_SCORE = 0.020
+# 1/(60+1) ≈ 0.0164.  Lowered to 0.015 to include single-path hits for sparse
+# strategy DBs while still excluding very low-confidence results.
+_MIN_RRF_SCORE = 0.015
 
 
 def _rrf_score(rank: int) -> float:
@@ -55,7 +55,13 @@ def _fuse(
         by_id[rid] = row
 
     ranked = sorted(scores.keys(), key=lambda k: scores[k], reverse=True)
-    return [by_id[rid] for rid in ranked[:_TOP_N] if scores[rid] >= _MIN_RRF_SCORE]
+    result = []
+    for rid in ranked[:_TOP_N]:
+        if scores[rid] >= _MIN_RRF_SCORE:
+            item = dict(by_id[rid])
+            item["_rrf"] = round(scores[rid], 4)
+            result.append(item)
+    return result
 
 
 async def retrieve_context(
@@ -129,6 +135,7 @@ async def retrieve_context(
                 "session_id": str(row["session_id"]),
                 "strategy_id": str(row["strategy_id"]) if row["strategy_id"] else None,
                 "created_at": row["created_at"].isoformat(),
+                "rrf_score": row.get("_rrf", 0.0),
             },
         })
 
@@ -176,6 +183,7 @@ async def retrieve_context(
                 "pair": row["pair"],
                 "timeframe": row["timeframe"],
                 "ir_json": dict(row["ir_json"]),
+                "rrf_score": row.get("_rrf", 0.0),
             },
         })
 
@@ -226,6 +234,7 @@ async def retrieve_context(
                 "strategy_id": str(row["strategy_id"]),
                 "pair": row["pair"],
                 "timeframe": row["timeframe"],
+                "rrf_score": row.get("_rrf", 0.0),
             },
         })
 

@@ -72,7 +72,7 @@ Detailed rules live in the relevant subfolder:
 | 5.1 | Microservice Decomposition | ✅ Complete — trading-service container |
 | 5.2 | UX & Stability | ✅ Complete — toasts, dual-axis chart, density toggle, SSE backoff |
 | 5.3 | Advanced Execution | ✅ Complete — limit orders, spread gating, TWAP |
-| 5.4 | RAG Evaluation | 🔲 Pending |
+| 5.4 | RAG Evaluation | ✅ Complete — retrieval logging, coverage endpoint, backfill task |
 
 ---
 

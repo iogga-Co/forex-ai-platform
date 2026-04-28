@@ -10,7 +10,7 @@ celery_app = Celery(
     "forex_ai",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["tasks.backtest", "tasks.optimization", "tasks.g_optimize"],
+    include=["tasks.backtest", "tasks.optimization", "tasks.g_optimize", "tasks.rag_backfill"],
 )
 
 celery_app.conf.update(
