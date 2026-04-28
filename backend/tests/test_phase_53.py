@@ -29,7 +29,7 @@ def _make_pool_mock(conn: AsyncMock) -> MagicMock:
     return pool
 
 
-def _make_executor(pool) -> "LiveExecutor":
+def _make_executor(pool):
     from live.executor import LiveExecutor
     executor = LiveExecutor.__new__(LiveExecutor)
     executor._pool  = pool
@@ -466,7 +466,6 @@ class TestExecutorTwap:
                 {"orderFillTransaction": {"id": "t2", "price": "1.08"}},
             ]
             # Make it an awaitable
-            import asyncio as _asyncio
             async def _twap(*args, **kwargs):
                 return mock_twap.return_value
             mock_twap.side_effect = _twap
