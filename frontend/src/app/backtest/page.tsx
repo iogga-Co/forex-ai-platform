@@ -458,7 +458,7 @@ function BacktestPageInner() {
                       </label>
                       <label className="flex items-center gap-0.5">
                         <span className="text-[10px] text-zinc-500">max</span>
-                        <Spinbox step={1000} min={1000} value={Number(sizing.max_size_units ?? 100000)}
+                        <Spinbox step={1000} min={1000} max={1000000} value={Number(sizing.max_size_units ?? 100000)}
                           onChange={(v) => updateSizingParam("max_size_units", v)} width="w-20" />
                       </label>
                     </div>
