@@ -393,6 +393,7 @@ async def get_run_strategies(
             br.sir_json         AS ir,
             br.passed_threshold,
             br.g_optimize_run_id AS run_id,
+            br.strategy_id,
             CASE
                 WHEN br.strategy_id IS NOT NULL THEN 'in_rag'
                 WHEN br.passed_threshold = TRUE  THEN 'pending'
