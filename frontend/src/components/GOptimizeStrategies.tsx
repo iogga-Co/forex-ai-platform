@@ -397,8 +397,9 @@ export default function GOptimizeStrategies({
 
                   <tr
                     key={item.backtest_run_id}
+                    onClick={() => toggleExpand(item.backtest_run_id)}
                     className={[
-                      "border-b border-zinc-800/60 transition-colors",
+                      "border-b border-zinc-800/60 transition-colors cursor-pointer",
                       isChecked
                         ? "bg-blue-900/10 border-l-2 border-l-blue-800"
                         : nearMiss
@@ -424,7 +425,7 @@ export default function GOptimizeStrategies({
                     <td className="px-3 py-1.5 text-right text-zinc-300">{fmtPct(item.win_rate)}</td>
                     <td className="px-3 py-1.5 text-right text-zinc-300">{fmtPct(item.max_dd)}</td>
                     <td className="px-3 py-1.5 text-right text-zinc-400">{item.trade_count ?? "—"}</td>
-                    <td className="px-3 py-1.5">
+                    <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                       {canPromote ? (
                         <button
                           onClick={() => handlePromote(item.backtest_run_id)}
@@ -437,14 +438,8 @@ export default function GOptimizeStrategies({
                         <RagBadge status={ragStatus} />
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-center">
-                      <button
-                        onClick={() => toggleExpand(item.backtest_run_id)}
-                        className="text-zinc-500 hover:text-zinc-300 transition-colors text-[10px] w-4"
-                        title={isExpanded ? "Collapse" : "Expand"}
-                      >
-                        {isExpanded ? "▾" : "▸"}
-                      </button>
+                    <td className="px-2 py-1.5 text-center text-zinc-500 text-[10px]">
+                      {isExpanded ? "▾" : "▸"}
                     </td>
                   </tr>
 
