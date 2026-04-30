@@ -801,7 +801,7 @@ function LabInner() {
                         </div>
                         {ind.type==="MACD" ? (
                           <div className="grid grid-cols-3 gap-1">
-                            {([["fast",1,50],["slow",5,100],["signal_period",1,50]] as [keyof typeof ind, number, number][]).map(([k,mn,mx]) => (
+                            {([["fast",2,200],["slow",2,500],["signal_period",1,100]] as [keyof typeof ind, number, number][]).map(([k,mn,mx]) => (
                               <div key={k}>
                                 <div className={lCls}>{k==="signal_period"?"sig":k}</div>
                                 <Spinbox value={ind[k] as number} min={mn} max={mx} onChange={v => updateIndicator(ind.id,{[k]:v})} width="w-full" />
@@ -810,7 +810,7 @@ function LabInner() {
                           </div>
                         ) : ind.type==="STOCH" ? (
                           <div className="grid grid-cols-3 gap-1">
-                            {([["period",1,100],["k_smooth",1,50],["d_period",1,50]] as [keyof typeof ind, number, number][]).map(([k,mn,mx]) => (
+                            {([["period",1,200],["k_smooth",1,50],["d_period",1,50]] as [keyof typeof ind, number, number][]).map(([k,mn,mx]) => (
                               <div key={k}>
                                 <div className={lCls}>{k==="k_smooth"?"Ksm":k==="d_period"?"Dpr":"per"}</div>
                                 <Spinbox value={ind[k] as number} min={mn} max={mx} onChange={v => updateIndicator(ind.id,{[k]:v})} width="w-full" />
@@ -821,11 +821,11 @@ function LabInner() {
                           <div className="flex gap-2">
                             <div className="flex-1">
                               <div className={lCls}>period</div>
-                              <Spinbox value={ind.period} min={5} max={100} onChange={v => updateIndicator(ind.id,{period:v})} width="w-full" />
+                              <Spinbox value={ind.period} min={5} max={500} onChange={v => updateIndicator(ind.id,{period:v})} width="w-full" />
                             </div>
                             <div className="flex-1">
                               <div className={lCls}>σ</div>
-                              <Spinbox value={ind.std_dev} min={0.5} max={5.0} step={0.1} float onChange={v => updateIndicator(ind.id,{std_dev:v})} width="w-full" />
+                              <Spinbox value={ind.std_dev} min={0.1} max={10.0} step={0.1} float onChange={v => updateIndicator(ind.id,{std_dev:v})} width="w-full" />
                             </div>
                           </div>
                         ) : (
@@ -833,8 +833,8 @@ function LabInner() {
                             <div className={lCls}>period</div>
                             <Spinbox
                               value={ind.period}
-                              min={(ind.type==="RSI"||ind.type==="ATR") ? 2 : 1}
-                              max={(ind.type==="EMA"||ind.type==="SMA") ? 999 : 100}
+                              min={ind.type==="RSI" ? 2 : 1}
+                              max={(ind.type==="EMA"||ind.type==="SMA") ? 1000 : ind.type==="RSI" ? 500 : 100}
                               onChange={v => updateIndicator(ind.id,{period:v})} width="w-24" />
                           </div>
                         )}

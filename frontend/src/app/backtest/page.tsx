@@ -58,23 +58,23 @@ interface ParamDef { key: string; label: string; step: number; min: number; max?
 function getConditionParams(cond: Record<string, unknown>): ParamDef[] {
   switch (cond.indicator as string) {
     case "MACD": return [
-      { key: "fast",          label: "fast", step: 1, min: 1, max: 50,  isInt: true },
-      { key: "slow",          label: "slow", step: 1, min: 5, max: 100, isInt: true },
-      { key: "signal_period", label: "sig",  step: 1, min: 1, max: 50,  isInt: true },
+      { key: "fast",          label: "fast", step: 1, min: 2, max: 200, isInt: true },
+      { key: "slow",          label: "slow", step: 1, min: 2, max: 500, isInt: true },
+      { key: "signal_period", label: "sig",  step: 1, min: 1, max: 100, isInt: true },
     ];
     case "BB": return [
-      { key: "period",  label: "period", step: 1,   min: 5,   max: 100, isInt: true },
-      { key: "std_dev", label: "σ",      step: 0.1, min: 0.5, max: 5.0 },
+      { key: "period",  label: "period", step: 1,   min: 5,   max: 500,  isInt: true },
+      { key: "std_dev", label: "σ",      step: 0.1, min: 0.1, max: 10.0 },
     ];
     case "STOCH": return [
-      { key: "period",   label: "K",   step: 1, min: 1, max: 100, isInt: true },
+      { key: "period",   label: "K",   step: 1, min: 1, max: 200, isInt: true },
       { key: "k_smooth", label: "Ksm", step: 1, min: 1, max: 50,  isInt: true },
       { key: "d_period", label: "D",   step: 1, min: 1, max: 50,  isInt: true },
     ];
     default: {
       const ind = (cond.indicator as string)?.toUpperCase();
-      const max = (ind === "EMA" || ind === "SMA") ? 999 : 100;
-      const min = (ind === "RSI" || ind === "ATR") ? 2 : 1;
+      const max = (ind === "EMA" || ind === "SMA") ? 1000 : ind === "RSI" ? 500 : 100;
+      const min = ind === "RSI" ? 2 : 1;
       const params: ParamDef[] = [{ key: "period", label: "period", step: 1, min, max, isInt: true }];
       if ("value" in cond) params.push({ key: "value", label: "val", step: 0.1, min: 0 });
       return params;
@@ -84,7 +84,7 @@ function getConditionParams(cond: Record<string, unknown>): ParamDef[] {
 
 function getExitParams(cond: Record<string, unknown>): ParamDef[] {
   if (cond.type === "atr") return [
-    { key: "period",     label: "period", step: 1,   min: 2,   max: 100, isInt: true },
+    { key: "period",     label: "period", step: 1,   min: 1,   max: 100, isInt: true },
     { key: "multiplier", label: "mult",   step: 0.1, min: 0.5, max: 10.0 },
   ];
   return [{ key: "value", label: cond.type === "pct" ? "%" : "pips", step: cond.type === "pct" ? 0.1 : 1, min: cond.type === "pct" ? 0.1 : 1 }];
