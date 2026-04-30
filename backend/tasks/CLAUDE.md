@@ -32,6 +32,13 @@
 - R:R floor: TP ≥ `rr_floor × SL`
 - All parameter values within min/max bounds
 
+### Startup recovery (`worker_ready` signal)
+
+`_reset_stale_runs` — registered on `celery.signals.worker_ready`. Fires when the g_optimize worker starts; resets any `g_optimize_runs` rows stuck at `status='running'` to `'failed'`. Guards against the common case where a SIGKILL (container restart, `time_limit` hard kill) bypasses Python exception handling and leaves the row permanently running.
+
+- Filtered by `sender.consumer.queues` — only runs when `g_optimize` is in the worker's queue set; backtest/optimization workers are unaffected.
+- Swallows all exceptions so a DB blip cannot prevent worker startup.
+
 ### RAG injection
 
 `embed_and_inject_rag()` — called for passing strategies:

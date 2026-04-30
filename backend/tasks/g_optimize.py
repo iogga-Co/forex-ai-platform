@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import psycopg2
 import psycopg2.extras
 import redis
+from celery.signals import worker_ready
 
 from core.celery_app import celery_app
 from core.config import settings
@@ -22,6 +23,36 @@ from engine.runner import run_backtest
 from engine.sir import StrategyIR
 
 logger = logging.getLogger(__name__)
+
+
+@worker_ready.connect
+def _reset_stale_runs(sender=None, **kwargs):
+    """Reset g_optimize_runs stuck in 'running' at startup due to SIGKILL/container restart."""
+    try:
+        queues = {q.name for q in (sender.consumer.queues or [])}
+        if "g_optimize" not in queues:
+            return
+    except Exception:
+        return  # Can't determine queues — skip to be safe
+
+    try:
+        with data_db.get_sync_conn(settings.database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE g_optimize_runs
+                    SET status = 'failed',
+                        error_message = 'Interrupted by worker restart',
+                        completed_at = NOW()
+                    WHERE status = 'running'
+                    """
+                )
+                count = cur.rowcount
+            conn.commit()
+        if count:
+            logger.warning("Reset %d stale g_optimize_run(s) stuck in 'running' state", count)
+    except Exception as exc:
+        logger.warning("Failed to reset stale g_optimize runs on startup: %s", exc)
 
 _STOP_KEY     = "g_optimize:stop:{run_id}"
 _SSE_CHANNEL  = "g_optimize:progress:{run_id}"
