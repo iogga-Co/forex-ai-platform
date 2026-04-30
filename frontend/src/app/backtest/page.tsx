@@ -87,7 +87,7 @@ function getExitParams(cond: Record<string, unknown>): ParamDef[] {
     { key: "period",     label: "period", step: 1,   min: 2,   max: 100, isInt: true },
     { key: "multiplier", label: "mult",   step: 0.1, min: 0.5, max: 10.0 },
   ];
-  return [{ key: "value", label: cond.type === "pct" ? "%" : "pips", step: cond.type === "pct" ? 0.1 : 1, min: 0.1 }];
+  return [{ key: "value", label: cond.type === "pct" ? "%" : "pips", step: cond.type === "pct" ? 0.1 : 1, min: cond.type === "pct" ? 0.1 : 1 }];
 }
 
 function fmt(v: number | null, d = 2) {
