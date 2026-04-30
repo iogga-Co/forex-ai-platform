@@ -462,7 +462,7 @@ async def promote_strategy(
         raise HTTPException(status_code=404, detail="G-Optimize backtest run not found")
 
     if row["strategy_id"] is not None:
-        return {"backtest_run_id": str(backtest_id), "rag_status": "in_rag"}
+        return {"backtest_run_id": str(backtest_id), "strategy_id": str(row["strategy_id"]), "rag_status": "in_rag"}
 
     sir_json = dict(row["sir_json"]) if row["sir_json"] else {}
     pair      = row["pair"]
@@ -513,7 +513,7 @@ async def promote_strategy(
         )
 
     logger.info("Promoted g_optimize bt_run %s → strategy %s", backtest_id, strategy_id)
-    return {"backtest_run_id": str(backtest_id), "rag_status": "in_rag"}
+    return {"backtest_run_id": str(backtest_id), "strategy_id": str(strategy_id), "rag_status": "in_rag"}
 
 
 class AnalyzeRequest(BaseModel):

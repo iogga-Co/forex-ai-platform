@@ -2,69 +2,78 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { fetchWithAuth } from "@/lib/auth";
 import { conditionToLabel, exitConditionToLabel } from "@/lib/strategyLabels";
 import type { GOptimizeRun, GOptimizeStrategy } from "@/lib/gOptimizeTypes";
 
-// ---------------------------------------------------------------------------
-// Action button bar — links to other pages with strategy context pre-filled
-// ---------------------------------------------------------------------------
-function ActionButtons({ item, run }: { item: GOptimizeStrategy; run: GOptimizeRun | null }) {
-  const pair        = item.pair;
-  const timeframe   = run?.timeframe ?? "";
-  const start       = run?.period_start?.slice(0, 10) ?? "";
-  const end         = run?.period_end?.slice(0, 10)   ?? "";
-  const sid         = item.strategy_id;
-  const btid        = item.backtest_run_id;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-  const disabledCls = "opacity-30 pointer-events-none";
-  const btnCls      = "rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors whitespace-nowrap";
+// ---------------------------------------------------------------------------
+// Action button bar — auto-promotes to RAG if needed, then navigates
+// ---------------------------------------------------------------------------
+function ActionButtons({ item, run, onPromoted }: {
+  item:       GOptimizeStrategy;
+  run:        GOptimizeRun | null;
+  onPromoted: (btRunId: string, strategyId: string) => void;
+}) {
+  const router    = useRouter();
+  const [busy, setBusy] = useState(false);
 
-  const buttons: { label: string; href: string; enabled: boolean }[] = [
-    {
-      label:   "Superchart",
-      href:    `/superchart?strategy_id=${sid}&backtest_id=${btid}`,
-      enabled: !!sid,
-    },
-    {
-      label:   "Backtest",
-      href:    `/backtest?strategy_id=${sid}&pair=${pair}&timeframe=${timeframe}&period_start=${start}&period_end=${end}`,
-      enabled: !!sid,
-    },
-    {
-      label:   "Optimize",
-      href:    `/optimization?strategy_id=${sid}&pair=${pair}&timeframe=${timeframe}&period_start=${start}&period_end=${end}`,
-      enabled: !!sid,
-    },
-    {
-      label:   "Refine",
-      href:    `/copilot?strategy_id=${sid}&pair=${pair}&timeframe=${timeframe}&backtest_id=${btid}`,
-      enabled: !!sid,
-    },
-    {
-      label:   "Open in Lab",
-      href:    `/lab?pair=${pair}&timeframe=${timeframe}`,
-      enabled: true,
-    },
-  ];
+  const pair      = item.pair;
+  const timeframe = run?.timeframe ?? "";
+  const start     = run?.period_start?.slice(0, 10) ?? "";
+  const end       = run?.period_end?.slice(0, 10)   ?? "";
+  const btid      = item.backtest_run_id;
+
+  const btnCls     = "rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed";
+  const labBtnCls  = "rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors whitespace-nowrap";
+
+  async function resolveStrategyId(): Promise<string | null> {
+    if (item.strategy_id) return item.strategy_id;
+    setBusy(true);
+    try {
+      const res = await fetchWithAuth(
+        `${API_BASE}/api/g-optimize/strategies/${btid}/promote`,
+        { method: "POST" },
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      const sid: string = data.strategy_id;
+      onPromoted(btid, sid);
+      return sid;
+    } catch {
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function go(buildHref: (sid: string) => string) {
+    const sid = await resolveStrategyId();
+    if (sid) router.push(buildHref(sid));
+  }
 
   return (
     <div className="flex flex-wrap gap-1.5 pt-1">
-      {buttons.map(({ label, href, enabled }) => (
-        <Link
-          key={label}
-          href={enabled ? href : "#"}
-          className={`${btnCls}${enabled ? "" : ` ${disabledCls}`}`}
-          title={!enabled ? "Promote to RAG to enable" : undefined}
-        >
-          {label} →
-        </Link>
-      ))}
+      <button disabled={busy} onClick={() => go((sid) => `/superchart?strategy_id=${sid}&backtest_id=${btid}`)} className={btnCls}>
+        {busy ? "…" : "Superchart →"}
+      </button>
+      <button disabled={busy} onClick={() => go((sid) => `/backtest?strategy_id=${sid}&pair=${pair}&timeframe=${timeframe}&period_start=${start}&period_end=${end}`)} className={btnCls}>
+        {busy ? "…" : "Backtest →"}
+      </button>
+      <button disabled={busy} onClick={() => go((sid) => `/optimization?strategy_id=${sid}&pair=${pair}&timeframe=${timeframe}&period_start=${start}&period_end=${end}`)} className={btnCls}>
+        {busy ? "…" : "Optimize →"}
+      </button>
+      <button disabled={busy} onClick={() => go((sid) => `/copilot?strategy_id=${sid}&pair=${pair}&timeframe=${timeframe}&backtest_id=${btid}`)} className={btnCls}>
+        {busy ? "…" : "Refine →"}
+      </button>
+      <Link href={`/lab?pair=${pair}&timeframe=${timeframe}`} className={labBtnCls}>
+        Open in Lab →
+      </Link>
     </div>
   );
 }
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -102,7 +111,7 @@ type SortKey = "sharpe" | "win_rate" | "max_dd" | "trades";
 // ---------------------------------------------------------------------------
 // Inline detail row
 // ---------------------------------------------------------------------------
-function DetailRow({ item, run }: { item: GOptimizeStrategy; run: GOptimizeRun | null }) {
+function DetailRow({ item, run, onPromoted }: { item: GOptimizeStrategy; run: GOptimizeRun | null; onPromoted: (btRunId: string, sid: string) => void }) {
   const ir    = item.ir ?? {};
   const entry = (ir.entry_conditions as Record<string, unknown>[] | undefined) ?? [];
   const exits = ir.exit_conditions as Record<string, unknown> | undefined;
@@ -156,7 +165,7 @@ function DetailRow({ item, run }: { item: GOptimizeStrategy; run: GOptimizeRun |
           </div>
 
           {/* Action buttons */}
-          <ActionButtons item={item} run={run} />
+          <ActionButtons item={item} run={run} onPromoted={onPromoted} />
         </div>
       </td>
     </tr>
@@ -206,7 +215,8 @@ export default function GOptimizeStrategies({
   const [loading,    setLoading]    = useState(false);
   const [expanded,   setExpanded]   = useState<Set<string>>(new Set());
   const [promoting,  setPromoting]  = useState<Record<string, boolean>>({});
-  const [ragOverrides, setRagOverrides] = useState<Record<string, string>>({});
+  const [ragOverrides,      setRagOverrides]      = useState<Record<string, string>>({});
+  const [strategyIdCache,   setStrategyIdCache]   = useState<Record<string, string>>({});
 
   const selectAllRef = useRef<HTMLInputElement>(null);
   const multiRun     = targetRunIds.length > 1;
@@ -443,7 +453,17 @@ export default function GOptimizeStrategies({
                     </td>
                   </tr>
 
-                  {isExpanded && <DetailRow key={`det-${item.backtest_run_id}`} item={item} run={runs.find((r) => r.id === item.run_id) ?? null} />}
+                  {isExpanded && (
+                    <DetailRow
+                      key={`det-${item.backtest_run_id}`}
+                      item={{ ...item, strategy_id: strategyIdCache[item.backtest_run_id] ?? item.strategy_id }}
+                      run={runs.find((r) => r.id === item.run_id) ?? null}
+                      onPromoted={(btRunId, sid) => {
+                        setRagOverrides((prev) => ({ ...prev, [btRunId]: "in_rag" }));
+                        setStrategyIdCache((prev) => ({ ...prev, [btRunId]: sid }));
+                      }}
+                    />
+                  )}
                 </>
               );
             })}
