@@ -424,6 +424,7 @@ async def get_run_strategies(
             "ir":               dict(r["ir"]) if r["ir"] else {},
             "passed_threshold": r["passed_threshold"],
             "run_id":           str(r["run_id"]),
+            "strategy_id":      str(r["strategy_id"]) if r["strategy_id"] else None,
             "rag_status":       r["rag_status"],
         }
 

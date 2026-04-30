@@ -6,6 +6,64 @@ import { fetchWithAuth } from "@/lib/auth";
 import { conditionToLabel, exitConditionToLabel } from "@/lib/strategyLabels";
 import type { GOptimizeRun, GOptimizeStrategy } from "@/lib/gOptimizeTypes";
 
+// ---------------------------------------------------------------------------
+// Action button bar — links to other pages with strategy context pre-filled
+// ---------------------------------------------------------------------------
+function ActionButtons({ item, run }: { item: GOptimizeStrategy; run: GOptimizeRun | null }) {
+  const pair        = item.pair;
+  const timeframe   = run?.timeframe ?? "";
+  const start       = run?.period_start?.slice(0, 10) ?? "";
+  const end         = run?.period_end?.slice(0, 10)   ?? "";
+  const sid         = item.strategy_id;
+  const btid        = item.backtest_run_id;
+
+  const disabledCls = "opacity-30 pointer-events-none";
+  const btnCls      = "rounded border border-blue-700 px-1.5 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors whitespace-nowrap";
+
+  const buttons: { label: string; href: string; enabled: boolean }[] = [
+    {
+      label:   "Superchart",
+      href:    `/superchart?strategy_id=${sid}&backtest_id=${btid}`,
+      enabled: !!sid,
+    },
+    {
+      label:   "Backtest",
+      href:    `/backtest?strategy_id=${sid}&pair=${pair}&timeframe=${timeframe}&period_start=${start}&period_end=${end}`,
+      enabled: !!sid,
+    },
+    {
+      label:   "Optimize",
+      href:    `/optimization?strategy_id=${sid}&pair=${pair}&timeframe=${timeframe}&period_start=${start}&period_end=${end}`,
+      enabled: !!sid,
+    },
+    {
+      label:   "Refine",
+      href:    `/copilot?strategy_id=${sid}&pair=${pair}&timeframe=${timeframe}&backtest_id=${btid}`,
+      enabled: !!sid,
+    },
+    {
+      label:   "Open in Lab",
+      href:    `/lab?pair=${pair}&timeframe=${timeframe}`,
+      enabled: true,
+    },
+  ];
+
+  return (
+    <div className="flex flex-wrap gap-1.5 pt-1">
+      {buttons.map(({ label, href, enabled }) => (
+        <Link
+          key={label}
+          href={enabled ? href : "#"}
+          className={`${btnCls}${enabled ? "" : ` ${disabledCls}`}`}
+          title={!enabled ? "Promote to RAG to enable" : undefined}
+        >
+          {label} →
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 // ---------------------------------------------------------------------------
@@ -44,7 +102,7 @@ type SortKey = "sharpe" | "win_rate" | "max_dd" | "trades";
 // ---------------------------------------------------------------------------
 // Inline detail row
 // ---------------------------------------------------------------------------
-function DetailRow({ item }: { item: GOptimizeStrategy }) {
+function DetailRow({ item, run }: { item: GOptimizeStrategy; run: GOptimizeRun | null }) {
   const ir    = item.ir ?? {};
   const entry = (ir.entry_conditions as Record<string, unknown>[] | undefined) ?? [];
   const exits = ir.exit_conditions as Record<string, unknown> | undefined;
@@ -97,15 +155,8 @@ function DetailRow({ item }: { item: GOptimizeStrategy }) {
             <span>Trades <strong className="text-zinc-200">{item.trade_count ?? "—"}</strong></span>
           </div>
 
-          {/* Action */}
-          {item.rag_status === "in_rag" && (
-            <Link
-              href={`/copilot?strategy_id=${item.backtest_run_id}`}
-              className="inline-flex items-center gap-1 rounded border border-blue-700 px-2 py-0.5 text-[10px] text-blue-400 hover:bg-blue-900/30 transition-colors"
-            >
-              Open in Co-Pilot →
-            </Link>
-          )}
+          {/* Action buttons */}
+          <ActionButtons item={item} run={run} />
         </div>
       </td>
     </tr>
@@ -397,7 +448,7 @@ export default function GOptimizeStrategies({
                     </td>
                   </tr>
 
-                  {isExpanded && <DetailRow key={`det-${item.backtest_run_id}`} item={item} />}
+                  {isExpanded && <DetailRow key={`det-${item.backtest_run_id}`} item={item} run={runs.find((r) => r.id === item.run_id) ?? null} />}
                 </>
               );
             })}

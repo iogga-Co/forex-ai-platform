@@ -35,6 +35,7 @@ export interface GOptimizeStrategy {
   rag_status: string; // 'in_rag' | 'pending' | 'none'
   passed_threshold: boolean;
   run_id: string;
+  strategy_id: string | null;
 }
 
 export interface GOptimizeRecommendation {
